@@ -3,12 +3,9 @@
 namespace Pelmered\LaraPara;
 
 use Illuminate\Database\Schema\Blueprint;
-use Livewire\Livewire;
 use Pelmered\LaraPara\Commands\CacheCommand;
 use Pelmered\LaraPara\Commands\ClearCacheCommand;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
-use Pelmered\LaraPara\Synthesizers\CurrencySynthesizer;
-use Pelmered\LaraPara\Synthesizers\MoneySynthesizer;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
