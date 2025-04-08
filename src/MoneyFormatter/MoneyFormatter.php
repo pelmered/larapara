@@ -186,7 +186,7 @@ class MoneyFormatter
 
     public static function getDefaultCurrency(): Currency
     {
-        $defaultCurrencyCode = (string) (config('larapara.default_currency') ?? Infolist::$defaultCurrency);
+        $defaultCurrencyCode = (string) (config('larapara.default_currency'));
 
         return Currency::fromCode($defaultCurrencyCode);
     }
