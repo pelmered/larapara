@@ -41,7 +41,7 @@ class TestCase extends \Orchestra\Testbench\TestCase
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
      */
-    protected function defineEnvironment($app)
+    protected function defineEnvironment($app): void
     {
         // Setup default database to use sqlite :memory:
         tap($app['config'], function (Repository $config): void {
@@ -71,7 +71,7 @@ class TestCase extends \Orchestra\Testbench\TestCase
      *
      * @return void
      */
-    protected function defineDatabaseMigrations()
+    protected function defineDatabaseMigrations(): void
     {
         artisan($this, 'migrate', ['--database' => 'testbench']);
 

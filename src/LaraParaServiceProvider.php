@@ -3,22 +3,13 @@
 namespace Pelmered\LaraPara;
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\ServiceProvider;
 use Pelmered\LaraPara\Commands\CacheCommand;
 use Pelmered\LaraPara\Commands\ClearCacheCommand;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
-use Spatie\LaravelPackageTools\Package;
-use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class LaraParaServiceProvider extends PackageServiceProvider
+class LaraParaServiceProvider extends ServiceProvider
 {
-    public static string $name = 'larapara';
-
-    public function configurePackage(Package $package): void
-    {
-        $package->name(static::$name)
-            ->hasConfigFile();
-    }
-
     public function boot(): void
     {
         $this->publishes([
