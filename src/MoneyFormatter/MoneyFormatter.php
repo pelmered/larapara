@@ -2,7 +2,6 @@
 
 namespace Pelmered\LaraPara\MoneyFormatter;
 
-use Filament\Infolists\Infolist;
 use Illuminate\Support\Number;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
