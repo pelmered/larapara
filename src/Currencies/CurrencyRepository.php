@@ -39,16 +39,16 @@ class CurrencyRepository
         };
 
         return match ($config['type']) {
-            'remember' => Cache::remember('filament_money_currencies', $config['ttl'], $callback),
-            'flexible' => Cache::flexible('filament_money_currencies', $config['ttl'], $callback),
-            'forever'  => Cache::forever('filament_money_currencies', $callback),
+            'remember' => Cache::remember('larapara_currencies', $config['ttl'], $callback),
+            'flexible' => Cache::flexible('larapara_currencies', $config['ttl'], $callback),
+            'forever'  => Cache::forever('larapara_currencies', $callback),
             default    => $callback(),
         };
     }
 
     public static function clearCache(): void
     {
-        Cache::forget('filament_money_currencies');
+        Cache::forget('larapara_currencies');
     }
 
     #[Throws(BindingResolutionException::class)]

@@ -14,14 +14,14 @@ test('cache command runs successfully', function (): void {
 
     CurrencyRepository::clearCache();
 
-    expect(Cache::has('filament_money_currencies'))->toBeFalse();
+    expect(Cache::has('larapara_currencies'))->toBeFalse();
 
     test()->artisan('money:cache')
         ->assertExitCode(0);
 
-    expect(Cache::has('filament_money_currencies'))->toBeTrue();
+    expect(Cache::has('larapara_currencies'))->toBeTrue();
 
-    $currencies  = Cache::get('filament_money_currencies');
+    $currencies  = Cache::get('larapara_currencies');
     $currencies2 = CurrencyRepository::getAvailableCurrencies();
 
     expect($currencies->count())->toBe($currencies2->count());
@@ -35,13 +35,13 @@ test('clear cache command runs successfully', function (): void {
 
     $currencies = CurrencyRepository::getAvailableCurrencies();
 
-    expect(Cache::has('filament_money_currencies'))->toBeTrue();
+    expect(Cache::has('larapara_currencies'))->toBeTrue();
 
     test()->artisan('money:clear')
         ->expectsOutput('Currencies cache cleared.')
         ->assertExitCode(0);
 
-    expect(Cache::has('filament_money_currencies'))->toBeFalse();
+    expect(Cache::has('larapara_currencies'))->toBeFalse();
 });
 
 test('cache command in verbose mode shows currency table', function (): void {

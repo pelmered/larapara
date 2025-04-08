@@ -14,7 +14,7 @@ class ClearCacheCommand extends Command
     #[Throws(InvalidArgumentException::class)]
     public function handle(): void
     {
-        Cache::delete('filament_money_currencies');
+        Cache::delete('larapara_currencies');
 
         $this->info('Currencies cache cleared.');
     }
