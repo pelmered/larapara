@@ -2,13 +2,7 @@
 
 namespace Pelmered\LaraPara\Tests;
 
-use BladeUI\Heroicons\BladeHeroiconsServiceProvider;
-use BladeUI\Icons\BladeIconsServiceProvider;
-use Filament\FilamentServiceProvider;
-use Filament\Forms\FormsServiceProvider;
-use Filament\Support\SupportServiceProvider;
 use Illuminate\Contracts\Config\Repository;
-use Livewire\LivewireServiceProvider;
 use Orchestra\Testbench\Attributes\WithMigration;
 use Pelmered\LaraPara\LaraParaServiceProvider;
 
@@ -22,14 +16,6 @@ class TestCase extends \Orchestra\Testbench\TestCase
     protected function getPackageProviders($app): array
     {
         return [
-            // Filament service providers
-            BladeHeroiconsServiceProvider::class,
-            BladeIconsServiceProvider::class,
-            FilamentServiceProvider::class,
-            FormsServiceProvider::class,
-            LivewireServiceProvider::class,
-            SupportServiceProvider::class,
-
             // This package service provider
             LaraParaServiceProvider::class,
         ];
