@@ -25,7 +25,6 @@ class TestCase extends \Orchestra\Testbench\TestCase
      * Define environment setup.
      *
      * @param  \Illuminate\Foundation\Application  $app
-     * @return void
      */
     protected function defineEnvironment($app): void
     {
@@ -54,8 +53,6 @@ class TestCase extends \Orchestra\Testbench\TestCase
 
     /**
      * Define database migrations.
-     *
-     * @return void
      */
     protected function defineDatabaseMigrations(): void
     {
