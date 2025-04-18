@@ -28,7 +28,8 @@
         "ext-intl": "*",
         "moneyphp/money": "^4.0",
         "illuminate/support": "^11.24 | ^12",
-        "php-static-analysis/attributes": "^0.3.1 | ^0.4.0"
+        "php-static-analysis/attributes": "^0.3.1 | ^0.4.0",
+        "spatie/laravel-package-tools": "^1.92"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0",

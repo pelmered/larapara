@@ -3,21 +3,30 @@
 namespace Pelmered\LaraPara;
 
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\ServiceProvider;
 use Pelmered\LaraPara\Commands\CacheCommand;
 use Pelmered\LaraPara\Commands\ClearCacheCommand;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
+use Spatie\LaravelPackageTools\Package;
+use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class LaraParaServiceProvider extends ServiceProvider
+class LaraParaServiceProvider extends PackageServiceProvider
 {
+    public static string $name = 'larapara';
+
+    public function configurePackage(Package $package): void
+    {
+        $package->name(static::$name)
+                ->hasConfigFile()
+                ->hasTranslations()
+                ->hasCommands([
+                    CacheCommand::class,
+                    ClearCacheCommand::class,
+                ]);
+    }
+
     public function boot(): void
     {
-        $this->publishes([
-            __DIR__.'/../config/larapara.php' => config_path('larapara.php'),
-        ], 'larapara');
-        $this->mergeConfigFrom(
-            __DIR__.'/../config/larapara.php', 'larapara'
-        );
+        parent::boot();
 
         // Requires Laravel 11.27.1
         // See: https://github.com/laravel/framework/pull/52928
@@ -29,11 +38,20 @@ class LaraParaServiceProvider extends ServiceProvider
             );
         }
 
-        $this->commands([
-            CacheCommand::class,
-            ClearCacheCommand::class,
-        ]);
+        $this->registerMacros();
+    }
 
+    public function register(): void
+    {
+        parent::register();
+
+        $this->app->bind(CurrencyCollection::class, function (): CurrencyCollection {
+            return new CurrencyCollection;
+        });
+    }
+
+    protected function registerMacros(): void
+    {
         Blueprint::macro('money', function (string $name, ?string $indexName = null) {
             $currencySuffix = config('larapara.currency_column_suffix');
 
@@ -87,13 +105,5 @@ class LaraParaServiceProvider extends ServiceProvider
 
             return $column;
         });
-    }
-
-    public function register(): void
-    {
-        $this->app->bind(CurrencyCollection::class, function (): CurrencyCollection {
-            return new CurrencyCollection;
-        });
-
     }
 }
