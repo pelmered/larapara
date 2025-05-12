@@ -15,7 +15,6 @@ return [
     'store' => [
         'format' => 'int', // Allowed values: 'int' or 'decimal'
     ],
-
     /*
     |---------------------------------------------------------------------------
     | Default currency
@@ -25,6 +24,7 @@ return [
     | For example: USD, EUR, SEK, etc.
     |
     */
+
     'default_currency' => env('MONEY_DEFAULT_CURRENCY', 'USD'),
 
     /*
