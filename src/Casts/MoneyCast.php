@@ -52,7 +52,7 @@ class MoneyCast implements CastsAttributes
             $key => config('larapara.store.format') === 'decimal'
                 ? $amount / 10 ** $this->getDecimals($currency)
                 : $amount,
-            $key.config('currency_column_suffix', '_currency') => $currency,
+            $key.config('larapara.currency_column_suffix', '_currency') => $currency,
         ];
     }
 
@@ -66,7 +66,7 @@ class MoneyCast implements CastsAttributes
             default                 => $value,
         };
 
-        return $amount ? (int) $amount : null;
+        return $amount !== null ? (int) $amount : null;
     }
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]
@@ -81,7 +81,7 @@ class MoneyCast implements CastsAttributes
 
     protected function getCurrencyFromModel(Model $model, string $name): MoneyCurrency
     {
-        $currency = $model->{$name.config('currency_column_suffix', '_currency')} ?? (string) (config('larapara.default_currency'));
+        $currency = $model->{$name.config('larapara.currency_column_suffix', '_currency')} ?? (string) (config('larapara.default_currency'));
 
         return $currency instanceof MoneyCurrency ? $currency : new MoneyCurrency($currency);
     }

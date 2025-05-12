@@ -105,11 +105,10 @@ return [
     | Currency cast
     |---------------------------------------------------------------------------
     |
-    | Which currency object shouldPelmered\LaraPara\Casts\CurrencyCast should cast to?
+    | What currency object should Pelmered\LaraPara\Casts\CurrencyCast should cast to.
     | Supported values are:
-    | - 'Pelmered\LaraPara\Currencies\Currency::class'
+    | - 'Pelmered\LaraPara\Currencies\Currency::class' (default and recommended)
     | - 'Money\Currency::class'
-    |
     */
     'currency_cast_to' => env('MONEY_CURRENCY_CAST', Pelmered\LaraPara\Currencies\Currency::class),
 ];
