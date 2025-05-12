@@ -16,12 +16,12 @@ class LaraParaServiceProvider extends PackageServiceProvider
     public function configurePackage(Package $package): void
     {
         $package->name(static::$name)
-                ->hasConfigFile()
-                ->hasTranslations()
-                ->hasCommands([
-                    CacheCommand::class,
-                    ClearCacheCommand::class,
-                ]);
+            ->hasConfigFile()
+            ->hasTranslations()
+            ->hasCommands([
+                CacheCommand::class,
+                ClearCacheCommand::class,
+            ]);
     }
 
     public function boot(): void

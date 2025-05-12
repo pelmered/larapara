@@ -75,8 +75,7 @@ class MoneyFormatter
                 $value = (int) ($value * (10 ** $decimals));
                 $value = (int) ($value * (10 ** abs($decimals)));
             }
-        }
-        elseif (is_int($value)) {
+        } elseif (is_int($value)) {
             $value /= 10 ** $minorDecimals;
         }
 
