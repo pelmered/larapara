@@ -27,7 +27,7 @@
         "php": "^8.2",
         "ext-intl": "*",
         "moneyphp/money": "^4.0",
-        "illuminate/support": "^11.24 | ^12",
+        "illuminate/support": "^11.24 | ^12 | ^13",
         "php-static-analysis/attributes": "^0.3.1 | ^0.4.0",
         "spatie/laravel-package-tools": "^1.92"
     },
