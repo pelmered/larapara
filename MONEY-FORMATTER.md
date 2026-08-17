@@ -89,7 +89,7 @@ echo MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', showCurr
 
 // Different decimals
 echo MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 0); // Output: $1,235
-echo MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 2); // Output: $1,235.56
+echo MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 2); // Output: $1,234.56
 echo MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: -2); // Output: $1,200
 
 // Using Money object
