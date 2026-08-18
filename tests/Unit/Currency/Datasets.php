@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Money\Currency as MoneyCurrency;
 
 dataset('currency data', [

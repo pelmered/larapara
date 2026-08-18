@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Tests\Unit\Concerns;
 
 use Pelmered\LaraPara\Tests\Unit\Concerns\Support\TestEnum;

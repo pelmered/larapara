@@ -34,14 +34,14 @@ class CurrencyRepository
             'ttl'  => 0,
         ]);
 
-        $callback = function (): \Pelmered\LaraPara\Currencies\CurrencyCollection {
+        $callback = function (): CurrencyCollection {
             return static::loadAvailableCurrencies();
         };
 
         return match ($config['type']) {
             'remember' => Cache::remember('larapara_currencies', $config['ttl'], $callback),
             'flexible' => Cache::flexible('larapara_currencies', $config['ttl'], $callback),
-            'forever'  => Cache::forever('larapara_currencies', $callback),
+            'forever'  => Cache::rememberForever('larapara_currencies', $callback),
             default    => $callback(),
         };
     }
@@ -84,7 +84,7 @@ class CurrencyRepository
 
         return new CurrencyCollection(
             Arr::mapWithKeys($availableCurrencies,
-                static function (string $currencyCode) use ($currencies) {
+                static function (string $currencyCode) use ($currencies): array {
                     return [
                         $currencyCode => new Currency(
                             strtoupper($currencyCode),

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Currencies\Providers;
 
 use PhpStaticAnalysis\Attributes\Type;
