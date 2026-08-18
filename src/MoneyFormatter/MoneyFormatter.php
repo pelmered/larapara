@@ -20,7 +20,7 @@ class MoneyFormatter
         int $outputStyle = NumberFormatter::CURRENCY,
         int $decimals = 2,
     ): string {
-        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals, currency: $money->getCurrency());
+        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals);
         $moneyFormatter  = new IntlMoneyFormatter($numberFormatter, new ISOCurrencies);
 
         return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
@@ -193,22 +193,15 @@ class MoneyFormatter
         return Currency::fromCode($defaultCurrencyCode);
     }
 
-    private static function getNumberFormatter(
-        string $locale,
-        int $style,
-        int $decimals = 2,
-        bool $showCurrencySymbol = true,
-        Currency|MoneyCurrency|null $currency = null,
-    ): NumberFormatter {
+    private static function getNumberFormatter(string $locale, int $style, int $decimals = 2, bool $showCurrencySymbol = true): NumberFormatter
+    {
         $config = config('larapara');
 
         $numberFormatter = new NumberFormatter($locale, $style);
 
         // Before the decimals, since the pattern carries its own fraction digits.
-        if ($showCurrencySymbol && $config['intl_currency_symbol'] && $currency !== null) {
-            $numberFormatter->setPattern(
-                self::intlCurrencyPattern($numberFormatter->getPattern(), $currency->getCode())
-            );
+        if ($showCurrencySymbol && $config['intl_currency_symbol']) {
+            $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
         }
 
         if ($decimals < 0) {
@@ -221,31 +214,15 @@ class MoneyFormatter
     }
 
     /**
-     * Renders the currency as its ISO code, which is what the international symbol is.
+     * Switches the currency placeholder of a pattern to the international one.
      *
-     * ICU substitutes the currency for the "\u{a4}" placeholder in the pattern, so replacing that
-     * placeholder with the code as a quoted literal keeps the placement, spacing and directional
-     * marks of the locale. Reading the symbol off the formatter instead returns the currency of
-     * the locale's region, and overwriting the affixes drops the directional marks that RTL
-     * locales put there.
+     * ICU renders "\u{a4}" as the currency symbol and "\u{a4}\u{a4}" as its ISO code, which is what
+     * the international symbol is, and substitutes the currency it is asked to format rather than
+     * the one of the locale. Leaving the substitution to ICU keeps the placement, spacing,
+     * directional marks and negative pattern of the locale.
      */
-    private static function intlCurrencyPattern(string $pattern, string $currencyCode): string
+    private static function intlCurrencyPattern(string $pattern): string
     {
-        return preg_replace_callback(
-            '/(?<before>[#0])?\x{00A4}+(?<after>[#0])?/u',
-            static function (array $matches) use ($currencyCode): string {
-                $before = $matches['before'] ?? '';
-                $after  = $matches['after']  ?? '';
-
-                // "\xc2\xa0" is a non-breaking space, needed only where the placeholder sits
-                // right next to the number and the locale has no separator of its own.
-                return $before
-                    .($before !== '' ? "\xc2\xa0" : '')
-                    ."'".$currencyCode."'"
-                    .($after !== '' ? "\xc2\xa0" : '')
-                    .$after;
-            },
-            $pattern,
-        ) ?? $pattern;
+        return preg_replace('/\x{00A4}+/u', "\u{a4}\u{a4}", $pattern) ?? $pattern;
     }
 }
