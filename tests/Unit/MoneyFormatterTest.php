@@ -2,6 +2,8 @@
 
 namespace Pelmered\LaraPara\Tests;
 
+use Money\Currency as MoneyCurrency;
+use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
@@ -227,6 +229,96 @@ it('formats to international currency symbol as suffix', function (): void {
     $cleanExpected = replaceNonBreakingSpaces('1 000,00 SEK');
 
     expect($cleanResult)->toEqual($cleanExpected);
+});
+
+// The international symbol must come from the currency being formatted, not from the locale's region.
+// See: https://github.com/pelmered/larapara/issues/5
+it('formats to the international currency symbol of the formatted currency', function (string $locale, string $expectedOutput): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(12345, Currency::fromCode('USD'), $locale);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
+})->with([
+    'locale without region'      => ['en', 'USD 123.45'],
+    'locale of the currency'     => ['en_US', 'USD 123.45'],
+    'locale with suffix symbol'  => ['sv_SE', '123,45 USD'],
+    'locale with other currency' => ['de_DE', '123,45 USD'],
+]);
+
+it('formats negative amounts with the international currency symbol', function (string $locale, string $expectedOutput): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(-12345, Currency::fromCode('USD'), $locale);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
+})->with([
+    'prefix symbol'                 => ['en_US', '-USD 123.45'],
+    'suffix symbol'                 => ['de_DE', '-123,45 USD'],
+    'suffix symbol with minus sign' => ['sv_SE', "\u{2212}123,45 USD"],
+]);
+
+it('abbreviates with the international currency symbol of the formatted currency', function (): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'sv_SE');
+
+    expect(replaceNonBreakingSpaces($result))->toEqual('1,23M USD');
+});
+
+// RTL locales put directional marks in both affixes, so the currency placement has to come from
+// the pattern. Reading it off a non-empty affix renders the code twice and drops the marks.
+it('formats to the international currency symbol in right to left locales', function (string $locale, string $localeCurrency): void {
+    // Only the directional marks, so the two outputs can be compared on those alone.
+    $marksOf = static fn (string $value): string => (string) preg_replace('/[^\x{200E}\x{200F}\x{061C}]/u', '', $value);
+
+    foreach ([123456, -123456] as $amount) {
+        config(['larapara.intl_currency_symbol' => false]);
+        $plain = MoneyFormatter::format($amount, Currency::fromCode('USD'), $locale);
+
+        config(['larapara.intl_currency_symbol' => true]);
+        $formatted = MoneyFormatter::format($amount, Currency::fromCode('USD'), $locale);
+
+        // Compared against what ICU itself does for the locale rather than against fixed output:
+        // CLDR reshapes these patterns between ICU releases and the test matrix spans several of
+        // them. What has to hold is that the code appears once, that it is the formatted currency
+        // rather than the locale's, and that the marks of the locale survive the rewrite.
+        expect(substr_count($formatted, 'USD'))->toBe(1)
+            ->and($formatted)->not->toContain($localeCurrency)
+            ->and($marksOf($formatted))->toBe($marksOf($plain));
+    }
+})->with([
+    'currency in the suffix' => ['he_IL', 'ILS'],
+    'currency in the prefix' => ['ar_AE', 'AED'],
+]);
+
+it('formats to the international currency symbol in the accounting style', function (): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $positive = MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+    $negative = MoneyFormatter::format(-123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+
+    // The accounting style brackets negatives instead of signing them, which the pattern keeps.
+    expect(replaceNonBreakingSpaces($positive))->toEqual('USD 1,234.56')
+        ->and(replaceNonBreakingSpaces($negative))->toEqual('(USD 1,234.56)');
+});
+
+it('gets the formatting rules of the given currency', function (): void {
+    expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('USD');
+});
+
+// ICU locale keywords only accept 3 character currency codes, so longer ones fall back to the
+// currency of the locale's region unless we short circuit them.
+it('gets the formatting rules of a currency ICU does not know', function (): void {
+    expect(MoneyFormatter::getFormattingRules('sv_SE', new MoneyCurrency('AERGO'))->currencySymbol)->toBe('AERGO');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(MoneyFormatter::getFormattingRules('sv_SE', new MoneyCurrency('AERGO'))->currencySymbol)->toBe('AERGO');
 });
 
 it('formats with decimal parameter', function (): void {

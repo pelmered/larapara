@@ -169,14 +169,24 @@ class MoneyFormatter
     public static function getFormattingRules(string $locale, Currency|MoneyCurrency $currency): CurrencyFormattingRules
     {
         $config          = config('larapara');
-        $numberFormatter = new NumberFormatter($locale.'@currency='.$currency->getCode(), NumberFormatter::CURRENCY);
+        $currencyCode    = $currency->getCode();
+        $numberFormatter = new NumberFormatter($locale.'@currency='.$currencyCode, NumberFormatter::CURRENCY);
+
+        $currencySymbol = $currencyCode;
+
+        if (! $config['intl_currency_symbol']) {
+            // ICU locale keywords only accept 3 character currency codes, so longer ones (most crypto
+            // currencies) are dropped and the formatter falls back to the currency of the locale's
+            // region. Its symbol would be the wrong one, so keep the code in that case.
+            $icuKnowsCurrency = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $currencyCode;
+
+            if ($icuKnowsCurrency) {
+                $currencySymbol = $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL);
+            }
+        }
 
         return new CurrencyFormattingRules(
-            currencySymbol: $numberFormatter->getSymbol(
-                $config['intl_currency_symbol']
-                    ? NumberFormatter::INTL_CURRENCY_SYMBOL
-                    : NumberFormatter::CURRENCY_SYMBOL
-            ),
+            currencySymbol: $currencySymbol,
             fractionDigits: $numberFormatter->getAttribute(NumberFormatter::FRACTION_DIGITS),
             decimalSeparator: $numberFormatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL),
             groupingSeparator: $numberFormatter->getSymbol(NumberFormatter::GROUPING_SEPARATOR_SYMBOL),
@@ -196,25 +206,32 @@ class MoneyFormatter
 
         $numberFormatter = new NumberFormatter($locale, $style);
 
+        $isCurrencyStyle = $style === NumberFormatter::CURRENCY || $style === NumberFormatter::CURRENCY_ACCOUNTING;
+
+        // Before the decimals, since the pattern carries its own fraction digits.
+        if ($isCurrencyStyle && $showCurrencySymbol && $config['intl_currency_symbol']) {
+            $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
+        }
+
         if ($decimals < 0) {
             $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, abs($decimals));
         } else {
             $numberFormatter->setAttribute(NumberFormatter::FRACTION_DIGITS, $decimals);
         }
 
-        if ($showCurrencySymbol && $config['intl_currency_symbol']) {
-            $intlCurrencySymbol = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL);
-            if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_PREFIX) !== '') {
-                // "\xc2\xa0" is a non-breaking space
-                $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_PREFIX, $intlCurrencySymbol."\xc2\xa0");
-            }
-
-            if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_SUFFIX) !== '') {
-                // "\xc2\xa0" is a non-breaking space
-                $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_SUFFIX, "\xc2\xa0".$intlCurrencySymbol);
-            }
-        }
-
         return $numberFormatter;
+    }
+
+    /**
+     * Switches the currency placeholder of a pattern to the international one.
+     *
+     * ICU renders "\u{a4}" as the currency symbol and "\u{a4}\u{a4}" as its ISO code, which is what
+     * the international symbol is, and substitutes the currency it is asked to format rather than
+     * the one of the locale. Leaving the substitution to ICU keeps the placement, spacing,
+     * directional marks and negative pattern of the locale.
+     */
+    private static function intlCurrencyPattern(string $pattern): string
+    {
+        return preg_replace('/\x{00A4}+/u', "\u{a4}\u{a4}", $pattern) ?? $pattern;
     }
 }
