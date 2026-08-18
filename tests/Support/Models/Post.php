@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Tests\Support\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;

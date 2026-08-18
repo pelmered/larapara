@@ -1,5 +1,8 @@
 <?php
 
+declare(strict_types=1);
+
+use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
 
 return [
@@ -110,5 +113,5 @@ return [
     | - 'Pelmered\LaraPara\Currencies\Currency::class' (default and recommended)
     | - 'Money\Currency::class'
     */
-    'currency_cast_to' => env('MONEY_CURRENCY_CAST', Pelmered\LaraPara\Currencies\Currency::class),
+    'currency_cast_to' => env('MONEY_CURRENCY_CAST', Currency::class),
 ];
