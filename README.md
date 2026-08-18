@@ -102,7 +102,7 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
 | `currency_column_suffix`  | `MONEY_CURRENCY_COLUMN_SUFFIX`  | `_currency`              | Suffix for the currency column belonging to an amount column.                                      |
 | `currency_cache.type`     | `MONEY_CURRENCY_CACHE`          | `flexible`               | `remember`, `flexible`, `forever` or `false` to disable.                                           |
-| `currency_cache.ttl`      | `MONEY_CURRENCY_CACHE_TTL`      | `[2592000, 31556926]`    | Cache TTL in seconds. `flexible` needs a `[stale, expires]` pair, so set that in the config file.  |
+| `currency_cache.ttl`      | `MONEY_CURRENCY_CACHE_TTL`      | `[2592000, 31556926]`    | Cache TTL in seconds. `flexible` takes a `[fresh, expires]` pair — the value is served stale between the two — so set it in the config file rather than `.env`. |
 | `load_crypto_currencies`  | `MONEY_LOAD_CRYPTO_CURRENCIES`  | `false`                  | Add crypto currencies to the currency list.                                                        |
 | `currency_cast_to`        | `MONEY_CURRENCY_CAST`           | `LaraPara\...\Currency`  | What `CurrencyCast` returns: LaraPara's `Currency` (recommended) or `Money\Currency`.               |
 
@@ -146,14 +146,28 @@ and a composite index over `[price_currency, price]`. Pass a second argument to 
 $table->money('price', 'products_price_index');
 ```
 
-To add a currency column to an existing amount column:
+The decimal variants use a scale of 3, which covers every ISO currency with up to three minor units. Use
+integer storage for anything with more precision than that — CLF has four minor units, and the crypto
+currencies have eight.
+
+To add a currency column to an existing amount column, add it as nullable, backfill the rows you already
+have, and only then make it required:
 
 ```php
 Schema::table('products', function (Blueprint $table) {
-    $table->string('price_currency', 6)->after('price');
+    $table->string('price_currency', 6)->nullable()->after('price');
+});
+
+DB::table('products')->whereNull('price_currency')->update(['price_currency' => 'USD']);
+
+Schema::table('products', function (Blueprint $table) {
+    $table->string('price_currency', 6)->nullable(false)->change();
     $table->index(['price_currency', 'price']);
 });
 ```
+
+Adding the column as non-nullable in one step fails on PostgreSQL as soon as the table has rows, and leaves
+amounts without a currency everywhere else.
 
 ### Casts
 
@@ -206,7 +220,10 @@ $product->price = 5000; // Currency from the model's currency column, or the def
 ```
 
 With `store.format = decimal`, the same `Money` object is stored as `1234.56` and read back as `123456`
-minor units, using the minor unit of the currency (2 for most currencies, 0 for JPY, 3 for BHD).
+minor units, using the minor unit of the currency — 2 for most currencies, 3 for BHD. Currencies with a
+minor unit of `0` are the exception: `MoneyCast` currently scales them by 2 anyway, so ¥1000 is written to
+the database as `10`. It round-trips correctly, but the stored number is off by a factor of 100, so prefer
+integer storage for those currencies.
 
 If you would rather not work with value objects, add an
 [accessor](https://laravel.com/docs/12.x/eloquent-mutators#accessors-and-mutators) that returns the raw value:
@@ -215,7 +232,7 @@ If you would rather not work with value objects, add an
 protected function price(): Attribute
 {
     return Attribute::make(
-        get: static fn (string $value) => $value,
+        get: static fn (?string $value) => $value,
     );
 }
 ```
@@ -223,7 +240,8 @@ protected function price(): Attribute
 ## Formatting and parsing money
 
 `Pelmered\LaraPara\MoneyFormatter\MoneyFormatter` provides static methods for formatting and parsing.
-Every method takes the locale explicitly, and amounts are in minor units unless stated otherwise.
+The formatting and parsing methods take the locale explicitly, and amounts are in minor units unless stated
+otherwise.
 
 For all methods that take `$decimals`: a positive value is the number of decimals, and a negative value is
 the number of significant digits, so `-2` on `12345678` gives `$120,000`. This only affects the formatted
@@ -502,12 +520,18 @@ MONEY_LOAD_CRYPTO_CURRENCIES=true
 Support for them is partial, since crypto currencies are not part of ISO 4217 and `intl` has no data for
 them. `Currency::fromCode('BTC')` works and gives you the right minor unit (8), and `getFormattingRules()`
 returns the currency code as the symbol, but formatting an amount *with* a currency symbol through
-`format()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`. Format the amount without
-the symbol, or with `numberFormat()`, and add the symbol yourself:
+`format()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`.
+
+Use `numberFormat()` with the currency's minor unit and add the symbol yourself:
 
 ```php
-MoneyFormatter::format($amount, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false).' BTC';
+// 100000000 minor units = 1 BTC
+MoneyFormatter::numberFormat(100000000, 'en_US', decimals: 8, minorDecimals: 8).' BTC'; // 1.00000000 BTC
 ```
+
+Note that `format(..., showCurrencySymbol: false)` is not a substitute here: it divides by 100 whatever the
+currency is, so the same amount comes out as `1,000,000.00`. That applies to any currency whose minor unit
+is not 2, crypto or not.
 
 The crypto list also has no currency names, so `Currency::name` is an empty string for those.
 
@@ -550,8 +574,9 @@ php artisan money:cache    # Build the currency cache (add -v to list the cached
 php artisan money:clear    # Clear it
 ```
 
-They are also wired into Laravel's optimization commands, so `php artisan optimize` and
-`php artisan optimize:clear` take care of the currency cache as well.
+On Laravel 11.27.1 and higher they are also wired into Laravel's optimization commands, so
+`php artisan optimize` and `php artisan optimize:clear` take care of the currency cache as well. On earlier
+versions, run `money:cache` and `money:clear` yourself.
 
 Set `MONEY_CURRENCY_CACHE=false` to disable caching, for example while developing a custom provider.
 
