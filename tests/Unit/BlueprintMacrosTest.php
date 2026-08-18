@@ -2,6 +2,21 @@
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\ColumnDefinition;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Fluent;
+
+/**
+ * Laravel 12 moved the connection into the Blueprint constructor's first argument.
+ */
+function newBlueprint(string $table): Blueprint
+{
+    $firstParameter = (new ReflectionMethod(Blueprint::class, '__construct'))->getParameters()[0];
+
+    return $firstParameter->getName() === 'connection'
+        ? new Blueprint(DB::connection(), $table)
+        : new Blueprint($table);
+}
 
 it('registers database macros', function (): void {
     // Test that the macros for Blueprint are registered
@@ -11,12 +26,12 @@ it('registers database macros', function (): void {
     expect(Blueprint::hasMacro('unsignedMoney'))->toBeTrue();
 });
 
-it('has correct blueprint money macro implementation', function ($macro, $config, $expected): void {
+it('has correct blueprint money macro implementation', function ($macro, $config, array $expected): void {
     $config = array_merge(config('larapara'), $config);
 
     config(['larapara' => $config]);
 
-    $blueprint = new Blueprint('test_table');
+    $blueprint = newBlueprint('test_table');
 
     $moneyColumn = $blueprint->{$macro}('price');
     $columns     = $blueprint->getColumns();
@@ -36,8 +51,8 @@ it('has correct blueprint money macro implementation', function ($macro, $config
     expect($currencyColumnAttributes)->toMatchArray($expected['currency']);
 
     if (isset($expected['index'])) {
-        $indexes = \Illuminate\Support\Arr::where($commands, function ($command): bool {
-            return $command instanceof \Illuminate\Support\Fluent && $command->index;
+        $indexes = Arr::where($commands, function ($command): bool {
+            return $command instanceof Fluent && $command->index;
         });
 
         expect(count($indexes))->toBe(1);

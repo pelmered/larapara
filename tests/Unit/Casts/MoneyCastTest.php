@@ -19,11 +19,6 @@ class TestModel extends Model
     ];
 
     protected $fillable = ['amount', 'currency'];
-
-    public function __construct(array $attributes = [])
-    {
-        parent::__construct($attributes);
-    }
 }
 
 it('casts to Money object', function (): void {
@@ -37,7 +32,7 @@ it('casts to Money object', function (): void {
 
     $casted = $cast->get($model, $key, $value, $attributes);
 
-    if (! $casted instanceof \Money\Money) {
+    if (! $casted instanceof Money) {
         $this->fail('MoneyCast->get did not return Money object');
     }
 
@@ -87,7 +82,7 @@ it('casts to Money with specified currency in cast definition', function (): voi
 
     $casted = $cast->get($model, $key, $value, $attributes);
 
-    if (! $casted instanceof \Money\Money) {
+    if (! $casted instanceof Money) {
         $this->fail('MoneyCast->get did not return Money object');
     }
 
@@ -187,7 +182,7 @@ it('casts to Money object from decimal', function (): void {
 
     $casted = $cast->get($model, $key, $value, $attributes);
 
-    if (! $casted instanceof \Money\Money) {
+    if (! $casted instanceof Money) {
         $this->fail('MoneyCast->get did not return Money object');
     }
 

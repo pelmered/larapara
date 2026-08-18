@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Enum;
 
 use Pelmered\LaraPara\Concerns\EnumHelpers;

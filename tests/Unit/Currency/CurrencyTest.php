@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 
@@ -21,8 +23,8 @@ it('can be created from currency code', function (string $code): void {
 it('throws exception for unsupported currency', function (): void {
     config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK']]);
 
-    expect(fn (): \Pelmered\LaraPara\Currencies\Currency => Currency::fromCode('PHP'))->toThrow(UnsupportedCurrency::class);
-    expect(fn (): \Pelmered\LaraPara\Currencies\Currency => Currency::fromCode('INR'))->toThrow(UnsupportedCurrency::class);
+    expect(fn (): Currency => Currency::fromCode('PHP'))->toThrow(UnsupportedCurrency::class);
+    expect(fn (): Currency => Currency::fromCode('INR'))->toThrow(UnsupportedCurrency::class);
 });
 
 /**
