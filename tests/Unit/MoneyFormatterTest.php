@@ -265,6 +265,27 @@ it('abbreviates with the international currency symbol of the formatted currency
     expect(replaceNonBreakingSpaces($result))->toEqual('1,23M USD');
 });
 
+// RTL locales put directional marks in both affixes, so the currency placement has to come from
+// the pattern. Reading it off a non-empty affix renders the code twice and drops the marks.
+it('formats to the international currency symbol in right to left locales', function (string $locale, string $expectedOutput): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(123456, Currency::fromCode('USD'), $locale);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
+})->with([
+    'currency and marks in the suffix' => ['he_IL', "\u{200F}1,234.56 \u{200F}USD"],
+    'marks around the suffix'          => ['ar_AE', "\u{200F}1,234.56 USD"],
+]);
+
+it('formats negative amounts with the international currency symbol in right to left locales', function (): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(-123456, Currency::fromCode('USD'), 'he_IL');
+
+    expect(replaceNonBreakingSpaces($result))->toEqual("\u{200F}\u{200E}-1,234.56 \u{200F}USD");
+});
+
 it('gets the formatting rules of the given currency', function (): void {
     expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
 

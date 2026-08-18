@@ -204,30 +204,48 @@ class MoneyFormatter
 
         $numberFormatter = new NumberFormatter($locale, $style);
 
+        // Before the decimals, since the pattern carries its own fraction digits.
+        if ($showCurrencySymbol && $config['intl_currency_symbol'] && $currency !== null) {
+            $numberFormatter->setPattern(
+                self::intlCurrencyPattern($numberFormatter->getPattern(), $currency->getCode())
+            );
+        }
+
         if ($decimals < 0) {
             $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, abs($decimals));
         } else {
             $numberFormatter->setAttribute(NumberFormatter::FRACTION_DIGITS, $decimals);
         }
 
-        if ($showCurrencySymbol && $config['intl_currency_symbol'] && $currency !== null) {
-            // The international symbol is the ISO code of the currency being formatted. Asking the
-            // formatter for it would return the currency of the locale's region instead.
-            $intlCurrencySymbol = $currency->getCode();
-            $minusSign          = $numberFormatter->getSymbol(NumberFormatter::MINUS_SIGN_SYMBOL);
-
-            // "\xc2\xa0" is a non-breaking space
-            if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_PREFIX) !== '') {
-                $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_PREFIX, $intlCurrencySymbol."\xc2\xa0");
-                $numberFormatter->setTextAttribute(NumberFormatter::NEGATIVE_PREFIX, $minusSign.$intlCurrencySymbol."\xc2\xa0");
-            }
-
-            if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_SUFFIX) !== '') {
-                $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_SUFFIX, "\xc2\xa0".$intlCurrencySymbol);
-                $numberFormatter->setTextAttribute(NumberFormatter::NEGATIVE_SUFFIX, "\xc2\xa0".$intlCurrencySymbol);
-            }
-        }
-
         return $numberFormatter;
+    }
+
+    /**
+     * Renders the currency as its ISO code, which is what the international symbol is.
+     *
+     * ICU substitutes the currency for the "\u{a4}" placeholder in the pattern, so replacing that
+     * placeholder with the code as a quoted literal keeps the placement, spacing and directional
+     * marks of the locale. Reading the symbol off the formatter instead returns the currency of
+     * the locale's region, and overwriting the affixes drops the directional marks that RTL
+     * locales put there.
+     */
+    private static function intlCurrencyPattern(string $pattern, string $currencyCode): string
+    {
+        return preg_replace_callback(
+            '/(?<before>[#0])?\x{00A4}+(?<after>[#0])?/u',
+            static function (array $matches) use ($currencyCode): string {
+                $before = $matches['before'] ?? '';
+                $after  = $matches['after']  ?? '';
+
+                // "\xc2\xa0" is a non-breaking space, needed only where the placeholder sits
+                // right next to the number and the locale has no separator of its own.
+                return $before
+                    .($before !== '' ? "\xc2\xa0" : '')
+                    ."'".$currencyCode."'"
+                    .($after !== '' ? "\xc2\xa0" : '')
+                    .$after;
+            },
+            $pattern,
+        ) ?? $pattern;
     }
 }
