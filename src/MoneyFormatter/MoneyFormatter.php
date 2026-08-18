@@ -172,14 +172,21 @@ class MoneyFormatter
         $currencyCode    = $currency->getCode();
         $numberFormatter = new NumberFormatter($locale.'@currency='.$currencyCode, NumberFormatter::CURRENCY);
 
-        // ICU locale keywords only accept 3 character currency codes, so longer ones (most crypto
-        // currencies) are dropped and the formatter falls back to the currency of the locale's region.
-        $isKnownToIcu = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $currencyCode;
+        $currencySymbol = $currencyCode;
+
+        if (! $config['intl_currency_symbol']) {
+            // ICU locale keywords only accept 3 character currency codes, so longer ones (most crypto
+            // currencies) are dropped and the formatter falls back to the currency of the locale's
+            // region. Its symbol would be the wrong one, so keep the code in that case.
+            $icuKnowsCurrency = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $currencyCode;
+
+            if ($icuKnowsCurrency) {
+                $currencySymbol = $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL);
+            }
+        }
 
         return new CurrencyFormattingRules(
-            currencySymbol: $config['intl_currency_symbol'] || ! $isKnownToIcu
-                ? $currencyCode
-                : $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL),
+            currencySymbol: $currencySymbol,
             fractionDigits: $numberFormatter->getAttribute(NumberFormatter::FRACTION_DIGITS),
             decimalSeparator: $numberFormatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL),
             groupingSeparator: $numberFormatter->getSymbol(NumberFormatter::GROUPING_SEPARATOR_SYMBOL),
@@ -199,8 +206,10 @@ class MoneyFormatter
 
         $numberFormatter = new NumberFormatter($locale, $style);
 
+        $isCurrencyStyle = $style === NumberFormatter::CURRENCY || $style === NumberFormatter::CURRENCY_ACCOUNTING;
+
         // Before the decimals, since the pattern carries its own fraction digits.
-        if ($showCurrencySymbol && $config['intl_currency_symbol']) {
+        if ($isCurrencyStyle && $showCurrencySymbol && $config['intl_currency_symbol']) {
             $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
         }
 
