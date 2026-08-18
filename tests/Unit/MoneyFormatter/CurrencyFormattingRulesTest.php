@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
 
 it('creates a correct default rules instance', function (): void {

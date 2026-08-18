@@ -1,4 +1,3 @@
-
 name: Tests
 
 on:
@@ -9,12 +8,19 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      # One failing combination should not cancel the rest; otherwise a single
+      # platform-specific failure hides the state of every other job.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        php: [8.2, 8.3, 8.4]
-        #dependencies: [lowest, highest]
+        php: [8.2, 8.3, 8.4, 8.5]
         stability: [prefer-lowest, prefer-stable]
-        #stability: [prefer-stable]
+        exclude:
+          # Laravel 11 (the prefer-lowest end of the supported range) predates
+          # PHP 8.5 and its dependencies still emit deprecations there. The
+          # 8.5 stack is covered by the prefer-stable job.
+          - php: 8.5
+            stability: prefer-lowest
 
     name: P${{ matrix.php }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
@@ -36,8 +42,56 @@ jobs:
       - name: Execute tests
         run: vendor/bin/pest
 
+  laravel:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # prefer-lowest/prefer-stable only cover the two ends of the supported
+        # Laravel range, so the middle would never be tested. Testbench must be
+        # pinned to select the Laravel line: 9 is Laravel 11, 10 is Laravel 12,
+        # 11 is Laravel 13.
+        include:
+          - name: 'Laravel 11'
+            php: '8.3'
+            testbench: '^9.0'
+          - name: 'Laravel 12'
+            php: '8.4'
+            testbench: '^10.0'
+          - name: 'Laravel 13'
+            php: '8.5'
+            testbench: '^11.0'
+
+    name: ${{ matrix.name }} (PHP ${{ matrix.php }})
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, fileinfo, zip, pdo, sqlite, pdo_sqlite, bcmath
+          coverage: none
+
+      - name: Pin Laravel version
+        # bash on every OS: under PowerShell, composer.bat goes through cmd.exe,
+        # which treats ^ as an escape character and strips it from the constraint.
+        shell: bash
+        run: composer require "orchestra/testbench:${{ matrix.testbench }}" --dev --no-update --no-interaction
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction
+
+      - name: Execute tests
+        run: vendor/bin/pest
+
   report-metrics:
     runs-on: ubuntu-latest
+    # Reporting only. Coverage thresholds and the upload depend on an external
+    # service, so a failure here must not fail the build.
+    continue-on-error: true
 
     steps:
       - name: Checkout code

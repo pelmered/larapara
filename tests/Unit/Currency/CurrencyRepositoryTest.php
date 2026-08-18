@@ -13,7 +13,7 @@ beforeEach(function (): void {
     Cache::flush();
     Cache::shouldReceive('remember')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
     Cache::shouldReceive('flexible')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
-    Cache::shouldReceive('forever')->andReturnUsing(fn ($key, $callback) => $callback());
+    Cache::shouldReceive('rememberForever')->andReturnUsing(fn ($key, $callback) => $callback());
 });
 
 it('checks if a currency is valid', function (): void {

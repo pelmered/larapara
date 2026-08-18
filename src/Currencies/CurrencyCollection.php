@@ -12,7 +12,7 @@ class CurrencyCollection extends Collection
     #[Returns('array<string, string>')]
     public function toSelectArray(): array
     {
-        return $this->mapWithKeys(function (Currency $currency) {
+        return $this->mapWithKeys(function (Currency $currency): array {
             return [
                 $currency->code => $currency->code.' - '.$currency->name,
             ];
