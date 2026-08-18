@@ -20,7 +20,7 @@ class MoneyFormatter
         int $outputStyle = NumberFormatter::CURRENCY,
         int $decimals = 2,
     ): string {
-        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals);
+        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals, currency: $money->getCurrency());
         $moneyFormatter  = new IntlMoneyFormatter($numberFormatter, new ISOCurrencies);
 
         return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
@@ -169,14 +169,17 @@ class MoneyFormatter
     public static function getFormattingRules(string $locale, Currency|MoneyCurrency $currency): CurrencyFormattingRules
     {
         $config          = config('larapara');
-        $numberFormatter = new NumberFormatter($locale.'@currency='.$currency->getCode(), NumberFormatter::CURRENCY);
+        $currencyCode    = $currency->getCode();
+        $numberFormatter = new NumberFormatter($locale.'@currency='.$currencyCode, NumberFormatter::CURRENCY);
+
+        // ICU locale keywords only accept 3 character currency codes, so longer ones (most crypto
+        // currencies) are dropped and the formatter falls back to the currency of the locale's region.
+        $isKnownToIcu = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $currencyCode;
 
         return new CurrencyFormattingRules(
-            currencySymbol: $numberFormatter->getSymbol(
-                $config['intl_currency_symbol']
-                    ? NumberFormatter::INTL_CURRENCY_SYMBOL
-                    : NumberFormatter::CURRENCY_SYMBOL
-            ),
+            currencySymbol: $config['intl_currency_symbol'] || ! $isKnownToIcu
+                ? $currencyCode
+                : $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL),
             fractionDigits: $numberFormatter->getAttribute(NumberFormatter::FRACTION_DIGITS),
             decimalSeparator: $numberFormatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL),
             groupingSeparator: $numberFormatter->getSymbol(NumberFormatter::GROUPING_SEPARATOR_SYMBOL),
@@ -190,8 +193,13 @@ class MoneyFormatter
         return Currency::fromCode($defaultCurrencyCode);
     }
 
-    private static function getNumberFormatter(string $locale, int $style, int $decimals = 2, bool $showCurrencySymbol = true): NumberFormatter
-    {
+    private static function getNumberFormatter(
+        string $locale,
+        int $style,
+        int $decimals = 2,
+        bool $showCurrencySymbol = true,
+        Currency|MoneyCurrency|null $currency = null,
+    ): NumberFormatter {
         $config = config('larapara');
 
         $numberFormatter = new NumberFormatter($locale, $style);
@@ -202,16 +210,21 @@ class MoneyFormatter
             $numberFormatter->setAttribute(NumberFormatter::FRACTION_DIGITS, $decimals);
         }
 
-        if ($showCurrencySymbol && $config['intl_currency_symbol']) {
-            $intlCurrencySymbol = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL);
+        if ($showCurrencySymbol && $config['intl_currency_symbol'] && $currency !== null) {
+            // The international symbol is the ISO code of the currency being formatted. Asking the
+            // formatter for it would return the currency of the locale's region instead.
+            $intlCurrencySymbol = $currency->getCode();
+            $minusSign          = $numberFormatter->getSymbol(NumberFormatter::MINUS_SIGN_SYMBOL);
+
+            // "\xc2\xa0" is a non-breaking space
             if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_PREFIX) !== '') {
-                // "\xc2\xa0" is a non-breaking space
                 $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_PREFIX, $intlCurrencySymbol."\xc2\xa0");
+                $numberFormatter->setTextAttribute(NumberFormatter::NEGATIVE_PREFIX, $minusSign.$intlCurrencySymbol."\xc2\xa0");
             }
 
             if ($numberFormatter->getTextAttribute(NumberFormatter::POSITIVE_SUFFIX) !== '') {
-                // "\xc2\xa0" is a non-breaking space
                 $numberFormatter->setTextAttribute(NumberFormatter::POSITIVE_SUFFIX, "\xc2\xa0".$intlCurrencySymbol);
+                $numberFormatter->setTextAttribute(NumberFormatter::NEGATIVE_SUFFIX, "\xc2\xa0".$intlCurrencySymbol);
             }
         }
 

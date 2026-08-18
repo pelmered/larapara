@@ -2,6 +2,7 @@
 
 namespace Pelmered\LaraPara\Tests;
 
+use Money\Currency as MoneyCurrency;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
@@ -227,6 +228,59 @@ it('formats to international currency symbol as suffix', function (): void {
     $cleanExpected = replaceNonBreakingSpaces('1 000,00 SEK');
 
     expect($cleanResult)->toEqual($cleanExpected);
+});
+
+// The international symbol must come from the currency being formatted, not from the locale's region.
+// See: https://github.com/pelmered/larapara/issues/5
+it('formats to the international currency symbol of the formatted currency', function (string $locale, string $expectedOutput): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(12345, Currency::fromCode('USD'), $locale);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
+})->with([
+    'locale without region'      => ['en', 'USD 123.45'],
+    'locale of the currency'     => ['en_US', 'USD 123.45'],
+    'locale with suffix symbol'  => ['sv_SE', '123,45 USD'],
+    'locale with other currency' => ['de_DE', '123,45 USD'],
+]);
+
+it('formats negative amounts with the international currency symbol', function (string $locale, string $expectedOutput): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(-12345, Currency::fromCode('USD'), $locale);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
+})->with([
+    'prefix symbol'                 => ['en_US', '-USD 123.45'],
+    'suffix symbol'                 => ['de_DE', '-123,45 USD'],
+    'suffix symbol with minus sign' => ['sv_SE', "\u{2212}123,45 USD"],
+]);
+
+it('abbreviates with the international currency symbol of the formatted currency', function (): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'sv_SE');
+
+    expect(replaceNonBreakingSpaces($result))->toEqual('1,23M USD');
+});
+
+it('gets the formatting rules of the given currency', function (): void {
+    expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('USD');
+});
+
+// ICU locale keywords only accept 3 character currency codes, so longer ones fall back to the
+// currency of the locale's region unless we short circuit them.
+it('gets the formatting rules of a currency ICU does not know', function (): void {
+    expect(MoneyFormatter::getFormattingRules('sv_SE', new MoneyCurrency('AERGO'))->currencySymbol)->toBe('AERGO');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(MoneyFormatter::getFormattingRules('sv_SE', new MoneyCurrency('AERGO'))->currencySymbol)->toBe('AERGO');
 });
 
 it('formats with decimal parameter', function (): void {
