@@ -268,25 +268,29 @@ it('abbreviates with the international currency symbol of the formatted currency
 
 // RTL locales put directional marks in both affixes, so the currency placement has to come from
 // the pattern. Reading it off a non-empty affix renders the code twice and drops the marks.
-it('formats to the international currency symbol in right to left locales', function (string $locale): void {
-    config(['larapara.intl_currency_symbol' => true]);
+it('formats to the international currency symbol in right to left locales', function (string $locale, string $localeCurrency): void {
+    // Only the directional marks, so the two outputs can be compared on those alone.
+    $marksOf = static fn (string $value): string => (string) preg_replace('/[^\x{200E}\x{200F}\x{061C}]/u', '', $value);
 
     foreach ([123456, -123456] as $amount) {
+        config(['larapara.intl_currency_symbol' => false]);
+        $plain = MoneyFormatter::format($amount, Currency::fromCode('USD'), $locale);
+
+        config(['larapara.intl_currency_symbol' => true]);
         $formatted = MoneyFormatter::format($amount, Currency::fromCode('USD'), $locale);
 
-        // Asserted on shape rather than on the exact output: CLDR moves the directional marks in
-        // these patterns between ICU releases, and the test matrix spans several of them.
-        $withoutMarks = str_replace(
-            ["\u{200E}", "\u{200F}", "\u{061C}"],
-            '',
-            replaceNonBreakingSpaces($formatted)
-        );
-
+        // Compared against what ICU itself does for the locale rather than against fixed output:
+        // CLDR reshapes these patterns between ICU releases and the test matrix spans several of
+        // them. What has to hold is that the code appears once, that it is the formatted currency
+        // rather than the locale's, and that the marks of the locale survive the rewrite.
         expect(substr_count($formatted, 'USD'))->toBe(1)
-            ->and($formatted)->toContain("\u{200F}")
-            ->and($withoutMarks)->toContain('1,234.56 USD');
+            ->and($formatted)->not->toContain($localeCurrency)
+            ->and($marksOf($formatted))->toBe($marksOf($plain));
     }
-})->with(['he_IL', 'ar_AE']);
+})->with([
+    'currency in the suffix' => ['he_IL', 'ILS'],
+    'currency in the prefix' => ['ar_AE', 'AED'],
+]);
 
 it('formats to the international currency symbol in the accounting style', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
