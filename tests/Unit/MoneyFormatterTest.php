@@ -3,6 +3,7 @@
 namespace Pelmered\LaraPara\Tests;
 
 use Money\Currency as MoneyCurrency;
+use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
@@ -286,6 +287,17 @@ it('formats to the international currency symbol in right to left locales', func
             ->and($withoutMarks)->toContain('1,234.56 USD');
     }
 })->with(['he_IL', 'ar_AE']);
+
+it('formats to the international currency symbol in the accounting style', function (): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $positive = MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+    $negative = MoneyFormatter::format(-123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+
+    // The accounting style brackets negatives instead of signing them, which the pattern keeps.
+    expect(replaceNonBreakingSpaces($positive))->toEqual('USD 1,234.56')
+        ->and(replaceNonBreakingSpaces($negative))->toEqual('(USD 1,234.56)');
+});
 
 it('gets the formatting rules of the given currency', function (): void {
     expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
