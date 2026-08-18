@@ -3,6 +3,7 @@
 namespace Pelmered\LaraPara\Tests;
 
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Foundation\Application;
 use Orchestra\Testbench\Attributes\WithMigration;
 use Pelmered\LaraPara\LaraParaServiceProvider;
 
@@ -24,7 +25,7 @@ class TestCase extends \Orchestra\Testbench\TestCase
     /**
      * Define environment setup.
      *
-     * @param  \Illuminate\Foundation\Application  $app
+     * @param  Application  $app
      */
     protected function defineEnvironment($app): void
     {
@@ -74,7 +75,6 @@ class TestCase extends \Orchestra\Testbench\TestCase
     {
         $reflectedClass = new \ReflectionClass($object);
         $reflection     = $reflectedClass->getProperty($property);
-        $reflection->setAccessible(true);
 
         return $reflection->getValue($object);
     }
