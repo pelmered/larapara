@@ -21,6 +21,15 @@ class MoneyFormatter
      */
     private const ABBREVIATIONS = ['', 'K', 'M', 'B', 'T', 'Q'];
 
+    /**
+     * Decimal places a parsed amount is rendered with before it is rounded to its minor unit.
+     *
+     * Enough to carry any amount a double holds meaningfully, and few enough to absorb the noise of
+     * the binary representation — 1.005 is stored as 1.00499999999999989, and rendering it to fewer
+     * places than this would round it down to 1.00 rather than to the 1.01 that was typed.
+     */
+    private const PARSE_DECIMAL_PLACES = 14;
+
     public static function formatMoney(
         Money $money,
         string $locale,
@@ -144,9 +153,11 @@ class MoneyFormatter
         }
 
         try {
-            // Formatted rather than cast to a string: (string) on a float goes through the
-            // `precision` ini setting, which deforms anything above 14 significant digits.
-            $decimalString = sprintf('%.'.(new ISOCurrencies)->subunitFor($currency).'F', $parsed);
+            // Formatted rather than cast to a string: (string) on a float goes through the `precision`
+            // ini setting, which deforms anything above 14 significant digits. The rounding to the
+            // minor unit is left to the parser, which rounds half up, rather than done here, where the
+            // last representable digit of the double would decide it instead.
+            $decimalString = sprintf('%.'.self::PARSE_DECIMAL_PLACES.'F', $parsed);
 
             return (new DecimalMoneyParser(new ISOCurrencies))->parse($decimalString, $currency)->getAmount();
         } catch (ParserException $e) {
@@ -265,6 +276,15 @@ class MoneyFormatter
         }
 
         if ($formattingRules->groupingSeparator !== '' && $formattingRules->groupingSeparator !== '.') {
+            // Grouping never follows the decimal separator, so a string where it does is malformed
+            // rather than merely out of position, and dropping it would move the decimal point.
+            $decimalPosition  = strpos($value, $formattingRules->decimalSeparator);
+            $groupingPosition = strrpos($value, $formattingRules->groupingSeparator);
+
+            if ($decimalPosition !== false && $groupingPosition > $decimalPosition) {
+                return $value;
+            }
+
             $separators[$formattingRules->groupingSeparator] = '';
         }
 

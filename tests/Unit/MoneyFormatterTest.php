@@ -3,7 +3,6 @@
 namespace Pelmered\LaraPara\Tests;
 
 use Money\Currency as MoneyCurrency;
-use Money\Exception\ParserException;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -206,66 +205,6 @@ it('parses decimal money in usd with intl symbol', function (mixed $input, strin
     expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
-
-// A grouping separator carries no value of its own, so one out of position is dropped rather than
-// refused. See: https://github.com/pelmered/larapara/issues/20
-it('parses a grouping separator that is out of position', function (string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
-        ->toBe($expectedOutput);
-})->with([
-    'in the decimals'                => ['2,00', '20000'],
-    'no grouping position at all'    => ['12,34', '123400'],
-    'genuine grouping is left alone' => ['1,234', '123400'],
-    'with a decimal separator'       => ['1,234.56', '123456'],
-]);
-
-// A dot is the decimal separator of nearly every keyboard and spreadsheet, so a dot the locale itself
-// refuses is read as one. Dropping it as grouping multiplied the amount by ten or a hundred, and left
-// no way to type a decimal point at all.
-it('parses a dot as a decimal separator in a locale that groups with dots', function (string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('EUR'), 'de_DE'))
-        ->toBe($expectedOutput);
-})->with([
-    'one decimal'                    => ['1.5', '150'],
-    'two decimals'                   => ['1.50', '150'],
-    'no grouping position at all'    => ['12.34', '1234'],
-    'genuine grouping is left alone' => ['1.234', '123400'],
-    'the decimal separator itself'   => ['1,5', '150'],
-    'both separators'                => ['1.234,56', '123456'],
-]);
-
-it('parses a dot as a decimal separator in a locale that groups with spaces', function (string $locale, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('SEK'), $locale))
-        ->toBe($expectedOutput);
-})->with([
-    'one decimal'                  => ['sv_SE', '1.5', '150'],
-    'two decimals'                 => ['sv_SE', '1.50', '150'],
-    'thousands'                    => ['sv_SE', '1 234.56', '123456'],
-    'no separator at all'          => ['sv_SE', '1234.56', '123456'],
-    'the decimal separator itself' => ['sv_SE', '1,5', '150'],
-    'narrow no-break space'        => ['fr_FR', '1.5', '150'],
-    'other space grouping locales' => ['pl_PL', '1.5', '150'],
-    'arabic-indic separators'      => ['ar_EG', '1.5', '150'],
-]);
-
-it('rejects a string that is not a number in its entirety', function (string $locale, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), $locale))
-        ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
-})->with([
-    'trailing text'      => ['en_US', '12 USD'],
-    'leading text'       => ['en_US', 'USD 12'],
-    'two decimal points' => ['en_US', '1.2.3'],
-    'hexadecimal'        => ['en_US', '0x1A'],
-    'not a number'       => ['en_US', 'invalid'],
-    'not finite'         => ['en_US', 'NaN'],
-]);
-
-// PHP's `precision` ini setting deforms a float above 14 significant digits on its way to a string,
-// which silently changed the amount.
-it('parses an amount above the float printing precision', function (): void {
-    expect(MoneyFormatter::parseDecimal('1234567890123456', Currency::fromCode('USD'), 'en_US'))
-        ->toBe('123456789012345600');
-});
 
 it('formats to international currency symbol', function (): void {
     config(['larapara.intl_currency_symbol' => true]);

@@ -399,22 +399,46 @@ public static function parseDecimal(
 ): string
 ```
 
-Returns the amount in minor units as a string, or an empty string for `null`/`''`. Throws
-`Money\Exception\ParserException` unless the whole string is a valid number in that locale — trailing or
-leading text, a second decimal point and a non-finite value are all refused rather than truncated to the
-part that did parse.
+Returns the amount in minor units as a string, or an empty string for `null`/`''`. Surrounding whitespace is
+ignored. The amount is rounded half up to the minor unit of the currency, so `'1.005'` is `101` cents.
 
-Separators are forgiven, though, since they are the most common way for user input to miss its locale. When
-a string is not a number in its locale, its separators get a second reading before it is refused:
+#### What is accepted
 
-- **A dot is read as the locale's decimal separator.** A dot means a decimal point on nearly every keyboard,
-  spreadsheet and programming language, so `'1.5'` parses as one and a half in `sv_SE`, `de_DE`, `fr_FR` and
-  `ar_EG` alike, not as fifteen or as one thousand five hundred.
-- **A grouping separator out of position is dropped.** It carries no value of its own, so `'2,00'` in
-  `en_US` parses as `200`, the same amount as `'200'`.
+**The whole string has to be a number.** ICU stops reading at the first character it cannot make sense of,
+so anything left over means the string was not an amount, and it throws `Money\Exception\ParserException`
+rather than returning the part that did parse:
 
-A separator that *is* in a grouping position always keeps its meaning, so `'1.234'` in `de_DE` is still one
-thousand two hundred and thirty four, and `'1,234'` in `en_US` still is too.
+```php
+MoneyFormatter::parseDecimal('12 USD', Currency::fromCode('USD'), 'en_US'); // ParserException
+MoneyFormatter::parseDecimal('1.2.3', Currency::fromCode('USD'), 'en_US');  // ParserException
+MoneyFormatter::parseDecimal('0x1A', Currency::fromCode('USD'), 'en_US');   // ParserException
+MoneyFormatter::parseDecimal('NaN', Currency::fromCode('USD'), 'en_US');    // ParserException
+```
+
+**Separators are forgiven**, since they are the most common way for user input to miss its locale. A string
+the locale itself refuses gets a second reading under two rules before being rejected:
+
+| Rule | Why | Example |
+|---|---|---|
+| A dot becomes the locale's decimal separator | A dot means a decimal point on nearly every keyboard, spreadsheet and programming language | `'1.5'` in `sv_SE` and `de_DE` alike is `150`, not `1500` |
+| A grouping separator out of position is dropped | It carries no value of its own | `'2,00'` in `en_US` is `20000`, the same amount as `'200'` |
+
+A separator that *is* in a grouping position always keeps its meaning, so `'1.234'` in `de_DE` and `'1,234'`
+in `en_US` are both one thousand two hundred and thirty four. Only a separator the locale has already refused
+reaches the rules above, which is why the two never contradict each other.
+
+#### What is still refused
+
+The rules read a separator that is merely out of place. They do not rescue a string that is a number in some
+*other* locale, because guessing which one would invent an amount:
+
+```php
+// Grouping never follows the decimal separator, so this is malformed rather than out of position
+MoneyFormatter::parseDecimal('1.234,56', Currency::fromCode('USD'), 'en_US'); // ParserException
+// A US number in a Swedish or German field stays ambiguous
+MoneyFormatter::parseDecimal('1,234.56', Currency::fromCode('SEK'), 'sv_SE'); // ParserException
+MoneyFormatter::parseDecimal('1,234.56', Currency::fromCode('EUR'), 'de_DE'); // ParserException
+```
 
 ```php
 use Pelmered\LaraPara\Currencies\Currency;
@@ -426,12 +450,18 @@ MoneyFormatter::parseDecimal('1 234,56', Currency::fromCode('SEK'), 'sv_SE'); //
 MoneyFormatter::parseDecimal('100', Currency::fromCode('USD'), 'en_US');      // '10000'
 MoneyFormatter::parseDecimal('', Currency::fromCode('USD'), 'en_US');         // ''
 
+// The separator rules
 MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US');       // '20000' — same as '200'
-MoneyFormatter::parseDecimal('1,234', Currency::fromCode('USD'), 'en_US');      // '123400'
+MoneyFormatter::parseDecimal('1,234', Currency::fromCode('USD'), 'en_US');      // '123400' — grouping kept
 MoneyFormatter::parseDecimal('1.5', Currency::fromCode('EUR'), 'de_DE');        // '150' — dot as decimal
 MoneyFormatter::parseDecimal('1.234', Currency::fromCode('EUR'), 'de_DE');      // '123400' — dot as grouping
 MoneyFormatter::parseDecimal('1.5', Currency::fromCode('SEK'), 'sv_SE');        // '150'
 MoneyFormatter::parseDecimal('1 234.56', Currency::fromCode('SEK'), 'sv_SE');   // '123456'
+
+// The minor unit of the currency decides the scale, and the rounding
+MoneyFormatter::parseDecimal('1234', Currency::fromCode('JPY'), 'en_US');       // '1234' — 0 minor units
+MoneyFormatter::parseDecimal('1.234', Currency::fromCode('BHD'), 'en_US');      // '1234' — 3 minor units
+MoneyFormatter::parseDecimal('1.005', Currency::fromCode('USD'), 'en_US');      // '101' — rounded half up
 
 MoneyFormatter::parseDecimal('invalid', Currency::fromCode('USD'), 'en_US');
 // Money\Exception\ParserException: The value must be a valid numeric value.
