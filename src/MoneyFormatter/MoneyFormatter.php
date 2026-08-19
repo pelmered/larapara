@@ -30,6 +30,20 @@ class MoneyFormatter
      */
     private const PARSE_DECIMAL_PLACES = 14;
 
+    /**
+     * Characters that stand for one another as a grouping separator.
+     *
+     * A locale's grouping separator is one member of a class: sv_SE groups with a no-break space,
+     * fr_FR with a narrow one, de_CH with a right single quotation mark. Keyboards produce the plain
+     * member — a space, an apostrophe — and ICU reads any of them as grouping where the grouping
+     * belongs, so the second reading has to know them all too. Otherwise which member CLDR happens to
+     * name decides whose input is forgiven, and that differs between ICU releases.
+     */
+    private const GROUPING_SEPARATOR_CLASSES = [
+        ["\u{0020}", "\u{00a0}", "\u{2009}", "\u{202f}"],
+        ["\u{0027}", "\u{2019}", "\u{02bc}"],
+    ];
+
     public static function formatMoney(
         Money $money,
         string $locale,
@@ -279,19 +293,37 @@ class MoneyFormatter
         }
 
         if ($formattingRules->groupingSeparator !== '' && $formattingRules->groupingSeparator !== '.') {
-            // Grouping never follows the decimal separator, so a string where it does is malformed
-            // rather than merely out of position, and dropping it would move the decimal point.
-            $decimalPosition  = strpos($value, $formattingRules->decimalSeparator);
-            $groupingPosition = strrpos($value, $formattingRules->groupingSeparator);
+            foreach (self::groupingSeparators($formattingRules->groupingSeparator) as $groupingSeparator) {
+                // Grouping never follows the decimal separator, so a string where it does is malformed
+                // rather than merely out of position, and dropping it would move the decimal point.
+                $decimalPosition  = strpos($value, $formattingRules->decimalSeparator);
+                $groupingPosition = strrpos($value, $groupingSeparator);
 
-            if ($decimalPosition !== false && $groupingPosition > $decimalPosition) {
-                return $value;
+                if ($decimalPosition !== false && $groupingPosition > $decimalPosition) {
+                    return $value;
+                }
+
+                $separators[$groupingSeparator] = '';
             }
-
-            $separators[$formattingRules->groupingSeparator] = '';
         }
 
         return $separators === [] ? $value : strtr($value, $separators);
+    }
+
+    /**
+     * Every character that stands for the given grouping separator, itself included.
+     *
+     * @return list<string>
+     */
+    private static function groupingSeparators(string $groupingSeparator): array
+    {
+        foreach (self::GROUPING_SEPARATOR_CLASSES as $separatorClass) {
+            if (in_array($groupingSeparator, $separatorClass, true)) {
+                return $separatorClass;
+            }
+        }
+
+        return [$groupingSeparator];
     }
 
     /**

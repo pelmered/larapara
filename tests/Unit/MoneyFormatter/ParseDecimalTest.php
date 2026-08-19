@@ -375,3 +375,70 @@ it('parses an empty value the same way in either mode', function (bool $strict):
     expect(MoneyFormatter::parseDecimal('', Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('')
         ->and(MoneyFormatter::parseDecimal(null, Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('');
 })->with([true, false]);
+
+/*
+|--------------------------------------------------------------------------
+| Separators people actually type
+|--------------------------------------------------------------------------
+|
+| A locale's grouping separator is one member of a class — sv_SE groups with
+| a no-break space, fr_FR with a narrow one, de_CH with a right single
+| quotation mark — and a keyboard produces the plain member. ICU reads any of
+| them where the grouping belongs, so the second reading knows them all too.
+| Otherwise which member CLDR names decides whose input is forgiven, and that
+| differs between ICU releases.
+|
+*/
+
+it('reads any member of the separator class as grouping, in position', function (string $locale, string $currency, string $separator): void {
+    $decimalSeparator = MoneyFormatter::getFormattingRules($locale, Currency::fromCode($currency))->decimalSeparator;
+
+    expect(MoneyFormatter::parseDecimal('1'.$separator.'234'.$decimalSeparator.'56', Currency::fromCode($currency), $locale))
+        ->toBe('123456');
+})->with([
+    'de_CH, apostrophe'      => ['de_CH', 'CHF', "\u{0027}"],
+    'de_CH, right quote'     => ['de_CH', 'CHF', "\u{2019}"],
+    'sv_SE, space'           => ['sv_SE', 'SEK', "\u{0020}"],
+    'sv_SE, no-break space'  => ['sv_SE', 'SEK', "\u{00a0}"],
+    'sv_SE, narrow no-break' => ['sv_SE', 'SEK', "\u{202f}"],
+    'sv_SE, thin space'      => ['sv_SE', 'SEK', "\u{2009}"],
+    'fr_FR, space'           => ['fr_FR', 'EUR', "\u{0020}"],
+    'fr_FR, no-break space'  => ['fr_FR', 'EUR', "\u{00a0}"],
+    'fr_FR, narrow no-break' => ['fr_FR', 'EUR', "\u{202f}"],
+]);
+
+it('reads any member of the separator class as grouping, out of position', function (string $locale, string $currency, string $separator): void {
+    expect(MoneyFormatter::parseDecimal('2'.$separator.'00', Currency::fromCode($currency), $locale))
+        ->toBe('20000');
+})->with([
+    'de_CH, apostrophe'      => ['de_CH', 'CHF', "\u{0027}"],
+    'de_CH, right quote'     => ['de_CH', 'CHF', "\u{2019}"],
+    'sv_SE, space'           => ['sv_SE', 'SEK', "\u{0020}"],
+    'sv_SE, no-break space'  => ['sv_SE', 'SEK', "\u{00a0}"],
+    'sv_SE, narrow no-break' => ['sv_SE', 'SEK', "\u{202f}"],
+    'sv_SE, thin space'      => ['sv_SE', 'SEK', "\u{2009}"],
+    'fr_FR, space'           => ['fr_FR', 'EUR', "\u{0020}"],
+    'fr_FR, no-break space'  => ['fr_FR', 'EUR', "\u{00a0}"],
+    'fr_FR, narrow no-break' => ['fr_FR', 'EUR', "\u{202f}"],
+]);
+
+// The class is the class of the locale's own separator, not a free-for-all: a space is not a grouping
+// separator in a locale that groups with a comma.
+it('reads only the class of the locale it is given', function (string $locale, string $currency, string $input): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+        ->toThrow(ParserException::class);
+})->with([
+    'space in a comma locale'      => ['en_US', 'USD', "2\u{00a0}00"],
+    'apostrophe in a comma locale' => ['en_US', 'USD', "2\u{2019}00"],
+    'apostrophe in a space locale' => ['sv_SE', 'SEK', "2\u{2019}00"],
+    'space in a dot locale'        => ['de_DE', 'EUR', "2\u{00a0}00"],
+]);
+
+it('still refuses a separator class member that follows the decimal separator', function (string $locale, string $currency, string $input): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+        ->toThrow(ParserException::class);
+})->with([
+    'de_CH, apostrophe'  => ['de_CH', 'CHF', "12.34\u{0027}56"],
+    'de_CH, right quote' => ['de_CH', 'CHF', "12.34\u{2019}56"],
+    'sv_SE, space'       => ['sv_SE', 'SEK', "12,34\u{0020}56"],
+]);
