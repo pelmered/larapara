@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Number;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -72,16 +74,22 @@ it('leaves out the currency symbol when asked to, at any magnitude', function (i
     'zero'        => [0, '0.00'],
 ]);
 
-it('abbreviates in the digits of the locale', function (string $locale, string $expectedOutput): void {
-    expect(MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), $locale, showCurrencySymbol: false))
-        ->toBe($expectedOutput);
+// The digits are the point here, so they are written out; the decimal separator between them comes
+// from ICU, since CLDR moves those between releases and the test matrix spans several ICU versions.
+it('abbreviates in the digits of the locale', function (string $locale, string $expectedDigits): void {
+    $currency  = Currency::fromCode('USD');
+    $digits    = mb_str_split($expectedDigits);
+    $separator = MoneyFormatter::getFormattingRules($locale, $currency)->decimalSeparator;
+
+    expect(MoneyFormatter::formatShort(123456789, $currency, $locale, showCurrencySymbol: false))
+        ->toBe($digits[0].$separator.$digits[1].$digits[2].'M');
 })->with([
-    'eastern arabic-indic'  => ['ar_EG', '١٫٢٣M'],
-    'extended arabic-indic' => ['fa_IR', '۱٫۲۳M'],
-    'bengali'               => ['bn_IN', '১.২৩M'],
-    'devanagari'            => ['mr_IN', '१.२३M'],
-    'tibetan'               => ['dz_BT', '༡.༢༣M'],
-    'latin with comma'      => ['de_DE', '1,23M'],
+    'eastern arabic-indic'  => ['ar_EG', '١٢٣'],
+    'extended arabic-indic' => ['fa_IR', '۱۲۳'],
+    'bengali'               => ['bn_IN', '১২৩'],
+    'devanagari'            => ['mr_IN', '१२३'],
+    'tibetan'               => ['dz_BT', '༡༢༣'],
+    'latin'                 => ['de_DE', '123'],
 ]);
 
 // The abbreviation used to be spliced into the formatted output with an ASCII-only regex, which
@@ -104,8 +112,19 @@ it('abbreviates with the international currency symbol', function (string $local
 })->with([
     'symbol as prefix' => ['en_US', 'USD 1.23M'],
     'symbol as suffix' => ['sv_SE', '1,23M USD'],
-    'non-latin digits' => ['ar_EG', "\u{200f}١٫٢٣M USD"],
 ]);
+
+// Asserted on the invariants rather than on fixed output: these locales put directional marks around
+// both affixes, and CLDR reshapes their patterns between ICU releases.
+it('abbreviates with the international currency symbol in a locale with non-latin digits', function (string $locale): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $currency = Currency::fromCode('USD');
+    $result   = MoneyFormatter::formatShort(123456789, $currency, $locale);
+
+    expect(substr_count($result, 'USD'))->toBe(1)
+        ->and($result)->toContain(MoneyFormatter::formatShort(123456789, $currency, $locale, showCurrencySymbol: false));
+})->with(['ar_EG', 'fa_IR', 'bn_IN', 'mr_IN', 'dz_BT']);
 
 it('abbreviates with the requested number of decimals', function (int $decimals, string $expectedOutput): void {
     expect(MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'en_US', decimals: $decimals))

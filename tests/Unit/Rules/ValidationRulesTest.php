@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Validator;
 use Money\Currency as MoneyCurrency;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 use Pelmered\LaraPara\Rules\MoneyString;
 use Pelmered\LaraPara\Rules\SupportedCurrency;
 
@@ -20,6 +21,19 @@ function validateValue(mixed $value, object $rule): Illuminate\Validation\Valida
     return Validator::make(['amount' => $value], ['amount' => [$rule]]);
 }
 
+/**
+ * Turns the marker 'localized' into 1234.56 written the way the locale writes it.
+ *
+ * Produced by the formatter rather than spelled out, since CLDR moves the separators of a locale
+ * between ICU releases and the test matrix spans several of them.
+ */
+function localizedAmount(mixed $value, string $locale, string $currency): mixed
+{
+    return $value === 'localized'
+        ? MoneyFormatter::format(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false)
+        : $value;
+}
+
 /*
 |--------------------------------------------------------------------------
 | MoneyString
@@ -27,11 +41,11 @@ function validateValue(mixed $value, object $rule): Illuminate\Validation\Valida
 */
 
 it('passes an amount its locale can read', function (string $locale, string $currency, mixed $value): void {
-    expect(validateValue($value, new MoneyString($currency, $locale))->passes())->toBeTrue();
+    expect(validateValue(localizedAmount($value, $locale, $currency), new MoneyString($currency, $locale))->passes())->toBeTrue();
 })->with([
     'us number'            => ['en_US', 'USD', '1,234.56'],
     'german number'        => ['de_DE', 'EUR', '1.234,56'],
-    'swedish number'       => ['sv_SE', 'SEK', "1\u{00a0}234,56"],
+    'swedish number'       => ['sv_SE', 'SEK', 'localized'],
     'no separators'        => ['en_US', 'USD', '1234.56'],
     'no decimals'          => ['en_US', 'USD', '100'],
     'negative'             => ['en_US', 'USD', '-1234.56'],
@@ -64,7 +78,7 @@ it('leaves an empty amount to required and nullable', function (mixed $value): v
 it('defaults the locale to the application locale', function (): void {
     app()->setLocale('sv_SE');
 
-    expect(validateValue("1\u{00a0}234,56", new MoneyString('SEK'))->passes())->toBeTrue()
+    expect(validateValue(localizedAmount('localized', 'sv_SE', 'SEK'), new MoneyString('SEK'))->passes())->toBeTrue()
         ->and(validateValue('1,234.56', new MoneyString('SEK'))->passes())->toBeFalse();
 });
 
@@ -113,11 +127,11 @@ it('forgives a separator out of place unless it is strict', function (string $lo
 ]);
 
 it('accepts what the locale itself writes even when it is strict', function (string $locale, string $currency, string $value): void {
-    expect(validateValue($value, new MoneyString($currency, $locale, strict: true))->passes())->toBeTrue();
+    expect(validateValue(localizedAmount($value, $locale, $currency), new MoneyString($currency, $locale, strict: true))->passes())->toBeTrue();
 })->with([
     'us number'         => ['en_US', 'USD', '1,234.56'],
     'german number'     => ['de_DE', 'EUR', '1.234,56'],
-    'swedish number'    => ['sv_SE', 'SEK', "1\u{00a0}234,56"],
+    'swedish number'    => ['sv_SE', 'SEK', 'localized'],
     'without grouping'  => ['en_US', 'USD', '1234.56'],
     'german without it' => ['de_DE', 'EUR', '1234,56'],
 ]);
@@ -142,8 +156,8 @@ it('passes a supported currency', function (mixed $value): void {
     'lower case'          => ['sek'],
     'mixed case'          => ['Sek'],
     'padded'              => [' SEK '],
-    'a LaraPara currency' => [fn () => Currency::fromCode('USD')],
-    'a Money currency'    => [fn () => new MoneyCurrency('USD')],
+    'a LaraPara currency' => [fn (): Currency => Currency::fromCode('USD')],
+    'a Money currency'    => [fn (): MoneyCurrency => new MoneyCurrency('USD')],
 ]);
 
 it('fails a currency this application does not support', function (mixed $value): void {

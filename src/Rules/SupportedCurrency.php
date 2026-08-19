@@ -29,7 +29,7 @@ class SupportedCurrency implements ValidationRule
         // nothing can satisfy, so it is refused here rather than at every submission.
         $this->currencyCodes = $currencyCodes === null
             ? null
-            : array_map(static fn (string $currencyCode): string => Currency::toCode($currencyCode), $currencyCodes);
+            : array_map(Currency::toCode(...), $currencyCodes);
     }
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
