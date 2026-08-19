@@ -160,8 +160,8 @@ class MoneyFormatter
             $decimalString = sprintf('%.'.self::PARSE_DECIMAL_PLACES.'F', $parsed);
 
             return (new DecimalMoneyParser(new ISOCurrencies))->parse($decimalString, $currency)->getAmount();
-        } catch (ParserException $e) {
-            throw new ParserException('The value must be a valid numeric value.', 0, $e);
+        } catch (ParserException $parserException) {
+            throw new ParserException('The value must be a valid numeric value.', 0, $parserException);
         }
     }
 
@@ -359,6 +359,6 @@ class MoneyFormatter
      */
     private static function numberSuffixPattern(string $pattern, string $suffix): string
     {
-        return preg_replace('/[#0][#0.,]*/', '$0\''.$suffix.'\'', $pattern) ?? $pattern;
+        return preg_replace('/[#0][#0.,]*/', '$0\''.$suffix."'", $pattern) ?? $pattern;
     }
 }

@@ -8,11 +8,6 @@ use InvalidArgumentException;
 
 class InvalidAmount extends InvalidArgumentException
 {
-    public function __construct(string $message)
-    {
-        parent::__construct($message);
-    }
-
     public static function notMinorUnits(string $value): self
     {
         return new self(

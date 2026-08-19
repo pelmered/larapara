@@ -55,6 +55,7 @@
     "scripts": {
         "phpstan": "vendor/bin/phpstan analyse src --level=8 --memory-limit=-1",
         "pint": "vendor/bin/pint",
+        "rector": "vendor/bin/rector --dry-run --ansi",
         "post-autoload-dump": [
             "@clear",
             "@prepare"
@@ -73,6 +74,7 @@
         ],
         "lint": [
             "composer pint",
+            "composer rector",
             "composer phpstan"
         ],
         "fix": [

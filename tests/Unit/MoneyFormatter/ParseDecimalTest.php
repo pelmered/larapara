@@ -10,6 +10,24 @@ beforeEach(function (): void {
     config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK', 'CHF', 'EGP', 'JPY', 'BHD', 'CLF']]);
 });
 
+/**
+ * Fills the separators of a locale into a template, where "_" stands for its grouping separator and
+ * "~" for its decimal one.
+ *
+ * Taken from ICU rather than written out: CLDR reshapes these between releases — the space of sv_SE,
+ * the apostrophe of de_CH and the Arabic-Indic separators have all moved — and the test matrix spans
+ * several ICU versions. What these tests are about is the rules, not which character CLDR picked.
+ */
+function localizedNumber(string $template, string $locale, string $currency): string
+{
+    $formattingRules = MoneyFormatter::getFormattingRules($locale, Currency::fromCode($currency));
+
+    return strtr($template, [
+        '_' => $formattingRules->groupingSeparator,
+        '~' => $formattingRules->decimalSeparator,
+    ]);
+}
+
 /*
 |--------------------------------------------------------------------------
 | The number a locale writes
@@ -20,19 +38,19 @@ beforeEach(function (): void {
 |
 */
 
-it('parses a number written the way its locale writes it', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('parses a number written the way its locale writes it', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
-    'comma grouping, dot decimal' => ['en_US', 'USD', '1,234.56', '123456'],
-    'dot grouping, comma decimal' => ['de_DE', 'EUR', '1.234,56', '123456'],
-    'space grouping'              => ['sv_SE', 'SEK', "1\u{00a0}234,56", '123456'],
-    'narrow space grouping'       => ['fr_FR', 'EUR', "1\u{202f}234,56", '123456'],
-    'apostrophe grouping'         => ['de_CH', 'CHF', "1\u{2019}234.56", '123456'],
-    'arabic-indic separators'     => ['ar_EG', 'EGP', '١٬٢٣٤٫٥٦', '123456'],
-    'no separators at all'        => ['en_US', 'USD', '1234.56', '123456'],
+    'comma grouping, dot decimal' => ['en_US', 'USD', '1_234~56', '123456'],
+    'dot grouping, comma decimal' => ['de_DE', 'EUR', '1_234~56', '123456'],
+    'space grouping'              => ['sv_SE', 'SEK', '1_234~56', '123456'],
+    'narrow space grouping'       => ['fr_FR', 'EUR', '1_234~56', '123456'],
+    'apostrophe grouping'         => ['de_CH', 'CHF', '1_234~56', '123456'],
+    'arabic-indic separators'     => ['ar_EG', 'EGP', '١_٢٣٤~٥٦', '123456'],
+    'no separators at all'        => ['en_US', 'USD', '1234~56', '123456'],
     'no decimals'                 => ['en_US', 'USD', '100', '10000'],
-    'several grouping separators' => ['en_US', 'USD', '1,000,000.00', '100000000'],
+    'several grouping separators' => ['en_US', 'USD', '1_000_000~00', '100000000'],
 ]);
 
 // An amount formatted by this package has to parse back to the amount it came from.
@@ -72,8 +90,8 @@ it('parses back what it formatted', function (string $locale, string $currency, 
 |
 */
 
-it('reads a dot as the decimal separator of the locale', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('reads a dot as the decimal separator of the locale', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     // Locales that group with dots: the dot would otherwise be dropped as grouping.
@@ -90,7 +108,7 @@ it('reads a dot as the decimal separator of the locale', function (string $local
     // Locales that group with a space: the dot is neither separator and used to be refused.
     'sv_SE, one decimal'   => ['sv_SE', 'SEK', '1.5', '150'],
     'sv_SE, two decimals'  => ['sv_SE', 'SEK', '1.50', '150'],
-    'sv_SE, with grouping' => ['sv_SE', 'SEK', "1\u{00a0}234.56", '123456'],
+    'sv_SE, with grouping' => ['sv_SE', 'SEK', '1_234.56', '123456'],
     'sv_SE, plain'         => ['sv_SE', 'SEK', '1234.56', '123456'],
     'fr_FR'                => ['fr_FR', 'EUR', '1.5', '150'],
     'fi_FI'                => ['fi_FI', 'EUR', '1.5', '150'],
@@ -134,17 +152,17 @@ it('needs no second reading where the dot already is the decimal separator', fun
 |
 */
 
-it('drops a grouping separator that is out of position', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('drops a grouping separator that is out of position', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
-    'in the decimals'         => ['en_US', 'USD', '2,00', '20000'],
-    'no grouping position'    => ['en_US', 'USD', '12,34', '123400'],
-    'a single digit group'    => ['en_US', 'USD', '1,2', '1200'],
-    'several out of position' => ['en_US', 'USD', '1,2,3', '12300'],
-    'before the decimals'     => ['en_US', 'USD', '12,34.56', '123456'],
-    'apostrophe grouping'     => ['de_CH', 'CHF', '2’00', '20000'],
-    'arabic-indic grouping'   => ['ar_EG', 'EGP', '٢٬٠٠', '20000'],
+    'in the decimals'         => ['en_US', 'USD', '2_00', '20000'],
+    'no grouping position'    => ['en_US', 'USD', '12_34', '123400'],
+    'a single digit group'    => ['en_US', 'USD', '1_2', '1200'],
+    'several out of position' => ['en_US', 'USD', '1_2_3', '12300'],
+    'before the decimals'     => ['en_US', 'USD', '12_34~56', '123456'],
+    'apostrophe grouping'     => ['de_CH', 'CHF', '2_00', '20000'],
+    'arabic-indic grouping'   => ['ar_EG', 'EGP', '٢_٠٠', '20000'],
 ]);
 
 it('keeps a grouping separator that is in position', function (string $input, string $expectedOutput): void {
@@ -158,13 +176,13 @@ it('keeps a grouping separator that is in position', function (string $input, st
 
 // Grouping never follows the decimal separator, so such a string is malformed rather than merely out
 // of position — dropping the separator would move the decimal point and invent an amount.
-it('refuses a grouping separator that follows the decimal separator', function (string $locale, string $currency, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('refuses a grouping separator that follows the decimal separator', function (string $locale, string $currency, string $template): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toThrow(ParserException::class);
 })->with([
-    'en_US, dot grouping input' => ['en_US', 'USD', '1.234,56'],
-    'en_US, trailing group'     => ['en_US', 'USD', '12.34,56'],
-    'de_CH, trailing group'     => ['de_CH', 'CHF', '12.34’56'],
+    'en_US, dot grouping input' => ['en_US', 'USD', '1~234_56'],
+    'en_US, trailing group'     => ['en_US', 'USD', '12~34_56'],
+    'de_CH, trailing group'     => ['de_CH', 'CHF', '12~34_56'],
 ]);
 
 // The two rules together cannot rescue a string that reads as another locale's number.
@@ -206,8 +224,8 @@ it('refuses a string that is not a number in its entirety', function (string $lo
 it('keeps the original exception as the cause where there is one', function (): void {
     try {
         MoneyFormatter::parseDecimal('nonsense', Currency::fromCode('USD'), 'en_US');
-    } catch (ParserException $e) {
-        expect($e->getMessage())->toBe('The value must be a valid numeric value.');
+    } catch (ParserException $parserException) {
+        expect($parserException->getMessage())->toBe('The value must be a valid numeric value.');
 
         return;
     }
@@ -232,17 +250,17 @@ it('parses zero', function (string $input): void {
     expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))->toBe('0');
 })->with(['0', '0.00', '0.001', '-0']);
 
-it('parses a negative amount', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('parses a negative amount', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'hyphen minus'          => ['en_US', 'USD', '-1.5', '-150'],
-    'with grouping'         => ['en_US', 'USD', '-1,234.56', '-123456'],
+    'with grouping'         => ['en_US', 'USD', '-1_234~56', '-123456'],
     'dot as decimal'        => ['de_DE', 'EUR', '-1.5', '-150'],
-    'own decimal separator' => ['de_DE', 'EUR', '-1,5', '-150'],
-    'space grouping'        => ['sv_SE', 'SEK', "-1\u{00a0}234,56", '-123456'],
-    'true minus sign'       => ['sv_SE', 'SEK', "\u{2212}1,5", '-150'],
-    'dropped grouping'      => ['en_US', 'USD', '-2,00', '-20000'],
+    'own decimal separator' => ['de_DE', 'EUR', '-1~5', '-150'],
+    'space grouping'        => ['sv_SE', 'SEK', '-1_234~56', '-123456'],
+    'true minus sign'       => ['sv_SE', 'SEK', "\u{2212}1~5", '-150'],
+    'dropped grouping'      => ['en_US', 'USD', '-2_00', '-20000'],
 ]);
 
 it('parses to the minor unit of the currency', function (string $currency, string $input, string $expectedOutput): void {
@@ -285,12 +303,12 @@ it('accepts the amount either side of surrounding whitespace', function (string 
     expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))->toBe('1234');
 })->with(['12.34', ' 12.34', '12.34 ', "\t12.34\n", '  12.34  ']);
 
-it('parses the digits of the locale', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+it('parses the digits of the locale', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
-    'eastern arabic-indic'      => ['ar_EG', 'EGP', '١٫٥', '150'],
-    'extended arabic-indic'     => ['fa_IR', 'EUR', '۱٫۵', '150'],
+    'eastern arabic-indic'      => ['ar_EG', 'EGP', '١~٥', '150'],
+    'extended arabic-indic'     => ['fa_IR', 'EUR', '۱~۵', '150'],
     'latin in an arabic locale' => ['ar_EG', 'EGP', '1.5', '150'],
 ]);
 
