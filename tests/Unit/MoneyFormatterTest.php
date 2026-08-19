@@ -219,9 +219,9 @@ it('parses a grouping separator that is out of position', function (string $inpu
     'with a decimal separator'       => ['1,234.56', '123456'],
 ]);
 
-// A dot is the decimal separator of nearly every keyboard and spreadsheet, so in the locales that
-// group with dots one out of grouping position is read as a decimal separator rather than dropped.
-// Dropping it multiplied the amount by ten or a hundred, and left no way to type a decimal point.
+// A dot is the decimal separator of nearly every keyboard and spreadsheet, so a dot the locale itself
+// refuses is read as one. Dropping it as grouping multiplied the amount by ten or a hundred, and left
+// no way to type a decimal point at all.
 it('parses a dot as a decimal separator in a locale that groups with dots', function (string $input, string $expectedOutput): void {
     expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('EUR'), 'de_DE'))
         ->toBe($expectedOutput);
@@ -232,6 +232,20 @@ it('parses a dot as a decimal separator in a locale that groups with dots', func
     'genuine grouping is left alone' => ['1.234', '123400'],
     'the decimal separator itself'   => ['1,5', '150'],
     'both separators'                => ['1.234,56', '123456'],
+]);
+
+it('parses a dot as a decimal separator in a locale that groups with spaces', function (string $locale, string $input, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('SEK'), $locale))
+        ->toBe($expectedOutput);
+})->with([
+    'one decimal'                  => ['sv_SE', '1.5', '150'],
+    'two decimals'                 => ['sv_SE', '1.50', '150'],
+    'thousands'                    => ['sv_SE', '1 234.56', '123456'],
+    'no separator at all'          => ['sv_SE', '1234.56', '123456'],
+    'the decimal separator itself' => ['sv_SE', '1,5', '150'],
+    'narrow no-break space'        => ['fr_FR', '1.5', '150'],
+    'other space grouping locales' => ['pl_PL', '1.5', '150'],
+    'arabic-indic separators'      => ['ar_EG', '1.5', '150'],
 ]);
 
 it('rejects a string that is not a number in its entirety', function (string $locale, string $input): void {

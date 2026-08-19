@@ -65,11 +65,12 @@ were passing a major-unit amount, multiply it by the minor unit first, or use `n
 - The whole string has to be a number in the given locale. `'12 USD'`, `'1.2.3'`, `'0x1A'` and `'NaN'` now
   throw `ParserException`, as the documentation always said they would, rather than returning the part that
   happened to parse.
-- In the locales that group with dots — `de_DE`, `es_ES`, `it_IT`, `pt_BR`, `nl_NL`, `tr_TR`, `id_ID`,
-  `da_DK` and the rest — a dot out of grouping position is now read as a decimal separator rather than
-  dropped: `'1.5'` in `de_DE` was `'1500'` (€15.00) and is now `'150'` (€1.50). Dropping it left no way to
-  type a decimal point with the character that nearly every keyboard and spreadsheet uses for one. A dot
-  that *is* in a grouping position keeps its meaning, so `'1.234'` is still `'123400'`.
+- A dot that the locale itself refuses is now read as that locale's decimal separator, since a dot means a
+  decimal point on nearly every keyboard, spreadsheet and programming language. In `de_DE`, `'1.5'` was
+  `'1500'` (€15.00) and is now `'150'` (€1.50) — dropping the dot as grouping left no way to type a decimal
+  point at all. In `sv_SE`, `fr_FR`, `pl_PL` and the other locales that group with spaces, `'1.5'` used to
+  throw and now parses as `'150'`. A dot that *is* in a grouping position keeps its meaning, so `'1.234'`
+  in `de_DE` is still `'123400'`.
 
   Every other grouping separator out of position is still dropped, unchanged: `'2,00'` in `en_US` is
   `'20000'`, the same as `'200'`. In those locales the dot is already the decimal separator, so a user who

@@ -130,25 +130,12 @@ class MoneyFormatter
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
         if ($parsed === false) {
-            $formattingRules = self::getFormattingRules($locale, $currency);
+            // Separators are the most common way for user input to miss its locale, so give them a
+            // second reading before giving up. See: https://github.com/pelmered/larapara/issues/20
+            $rewritten = self::rewriteSeparators($moneyString, self::getFormattingRules($locale, $currency));
 
-            // A grouping separator out of position is the most common way for user input to miss its
-            // locale, so give it a second reading before giving up.
-            // See: https://github.com/pelmered/larapara/issues/20
-            if ($formattingRules->groupingSeparator !== '' && str_contains($moneyString, $formattingRules->groupingSeparator)) {
-                // A grouping separator carries no value of its own, so it is dropped — except a dot,
-                // which is the decimal separator of nearly every keyboard and spreadsheet people
-                // type numbers into. Dropping that would turn 1.5 into 15 and leave no way to type a
-                // decimal point at all, so in the locales that group with dots it is read as one.
-                $reading = $formattingRules->groupingSeparator === '.'
-                    ? $formattingRules->decimalSeparator
-                    : '';
-
-                $parsed = self::parseLocalizedNumber($numberFormatter, str_replace(
-                    $formattingRules->groupingSeparator,
-                    $reading,
-                    $moneyString
-                ));
+            if ($rewritten !== $moneyString) {
+                $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
             }
         }
 
@@ -255,6 +242,33 @@ class MoneyFormatter
         }
 
         return [$mantissa, self::ABBREVIATIONS[$magnitude]];
+    }
+
+    /**
+     * Reads the separators of a string that is not a number in its locale the way it was likely meant.
+     *
+     * A dot becomes the decimal separator of the locale, since that is what a dot means on nearly
+     * every keyboard, spreadsheet and programming language people type numbers into. Only a dot that
+     * ICU already refused gets here — one in a genuine grouping position parses on the first attempt —
+     * so this is safe even in the locales that group with dots, and it is why such a locale must not
+     * also have its dots dropped as grouping below.
+     *
+     * A grouping separator out of position carries no value of its own, so it is dropped: "2,00" in
+     * en_US is the same amount as "200".
+     */
+    private static function rewriteSeparators(string $value, CurrencyFormattingRules $formattingRules): string
+    {
+        $separators = [];
+
+        if ($formattingRules->decimalSeparator !== '.') {
+            $separators['.'] = $formattingRules->decimalSeparator;
+        }
+
+        if ($formattingRules->groupingSeparator !== '' && $formattingRules->groupingSeparator !== '.') {
+            $separators[$formattingRules->groupingSeparator] = '';
+        }
+
+        return $separators === [] ? $value : strtr($value, $separators);
     }
 
     /**
