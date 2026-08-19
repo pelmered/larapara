@@ -135,6 +135,8 @@ it('sets value to null', function (): void {
 });
 
 it('handles array input', function (): void {
+    config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK', 'JPY']]);
+
     $model        = new TestModel;
     $model->price = [
         'amount'   => '98765',

@@ -3,6 +3,7 @@
 namespace Pelmered\LaraPara\Tests;
 
 use Money\Currency as MoneyCurrency;
+use Money\Exception\ParserException;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -206,9 +207,37 @@ it('parses decimal money in usd with intl symbol', function (mixed $input, strin
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
 
-it('parses small decimal money', function (): void {
-    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))
-        ->toBe('20000');
+// A grouping separator typed where the decimal separator belongs is read as a decimal separator,
+// rather than dropped, which would multiply the amount by a hundred.
+// See: https://github.com/pelmered/larapara/issues/20
+it('parses a decimal separator typed as the grouping separator', function (string $locale, string $currency, string $input, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+        ->toBe($expectedOutput);
+})->with([
+    'grouping separator in the decimals' => ['en_US', 'USD', '2,00', '200'],
+    'no grouping position at all'        => ['en_US', 'USD', '12,34', '1234'],
+    'dot grouping locale'                => ['de_DE', 'EUR', '1.5', '150'],
+    'genuine grouping is left alone'     => ['en_US', 'USD', '1,234', '123400'],
+    'genuine dot grouping is left alone' => ['de_DE', 'EUR', '1.234', '123400'],
+]);
+
+it('rejects a string that is not a number in its entirety', function (string $locale, string $input): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), $locale))
+        ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
+})->with([
+    'trailing text'      => ['en_US', '12 USD'],
+    'leading text'       => ['en_US', 'USD 12'],
+    'two decimal points' => ['en_US', '1.2.3'],
+    'hexadecimal'        => ['en_US', '0x1A'],
+    'not a number'       => ['en_US', 'invalid'],
+    'not finite'         => ['en_US', 'NaN'],
+]);
+
+// PHP's `precision` ini setting deforms a float above 14 significant digits on its way to a string,
+// which silently changed the amount.
+it('parses an amount above the float printing precision', function (): void {
+    expect(MoneyFormatter::parseDecimal('1234567890123456', Currency::fromCode('USD'), 'en_US'))
+        ->toBe('123456789012345600');
 });
 
 it('formats to international currency symbol', function (): void {
@@ -340,3 +369,27 @@ it('formats 0 in short format', function (): void {
     expect(MoneyFormatter::formatShort(0, Currency::fromCode('USD'), 'en_US', decimals: -3))
         ->toBe(replaceNonBreakingSpaces('$0'));
 });
+
+// The amount only used to be divided by a hardcoded hundred here, which was wrong for every
+// currency whose minor unit is not two.
+it('formats without a currency symbol by the minor unit of the currency', function (string $currency, int $value, int $decimals, string $expectedOutput): void {
+    config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK', 'JPY', 'BHD']]);
+
+    expect(MoneyFormatter::format($value, Currency::fromCode($currency), 'en_US', decimals: $decimals, showCurrencySymbol: false))
+        ->toBe($expectedOutput);
+})->with([
+    'two minor units'   => ['USD', 123456, 2, '1,234.56'],
+    'no minor units'    => ['JPY', 1234, 0, '1,234'],
+    'three minor units' => ['BHD', 1234567, 3, '1,234.567'],
+]);
+
+// Negative decimals are significant digits, which ICU applies on its own. Scaling the value through
+// an intermediate int cast first zeroed anything below the scale factor.
+it('formats to a number of significant digits', function (mixed $value, int $decimals, string $expectedOutput): void {
+    expect(MoneyFormatter::numberFormat($value, 'en_US', decimals: $decimals))
+        ->toBe($expectedOutput);
+})->with([
+    'documented example'    => [1234.56, -2, '1,200'],
+    'value below the scale' => [12.34, -3, '12.3'],
+    'minor units input'     => [123456, -3, '1,230'],
+]);

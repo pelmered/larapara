@@ -1,6 +1,7 @@
 <?php
 
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\InvalidAmount;
 use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
@@ -31,12 +32,26 @@ it('formats small values correctly', function (): void {
         ->toEqual('$0.00');
 });
 
-it('handles invalid inputs gracefully', function (): void {
-    // Testing non-numeric string
-    expect(MoneyFormatter::format('not-a-number', Currency::fromCode('USD'), 'en_US'))
-        ->toEqual('$0.00');
+// An amount is whole minor units. Anything else used to be cast to an int, which turned it into a
+// plausible looking wrong amount instead of an error.
+it('refuses an amount that is not whole minor units', function (mixed $value): void {
+    expect(fn (): string => MoneyFormatter::format($value, Currency::fromCode('USD'), 'en_US'))
+        ->toThrow(InvalidAmount::class);
+})->with([
+    'not a number'        => ['not-a-number'],
+    'decimals'            => ['199.99'],
+    'thousands separator' => ['1,234'],
+    'trailing text'       => ['1234 USD'],
+]);
 
-    // Testing boolean
+it('formats an amount given as a numeric string', function (): void {
+    expect(MoneyFormatter::format('123456', Currency::fromCode('USD'), 'en_US'))
+        ->toEqual('$1,234.56')
+        ->and(MoneyFormatter::format(' -123456 ', Currency::fromCode('USD'), 'en_US'))
+        ->toEqual('-$1,234.56');
+});
+
+it('handles boolean inputs', function (): void {
     expect(MoneyFormatter::format(true, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$0.01');
     expect(MoneyFormatter::format(false, Currency::fromCode('USD'), 'en_US'))

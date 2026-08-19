@@ -2,18 +2,25 @@
 
 namespace Pelmered\LaraPara\MoneyFormatter;
 
-use Illuminate\Support\Number;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
 use Money\Exception\ParserException;
 use Money\Formatter\IntlMoneyFormatter;
 use Money\Money;
-use Money\Parser\IntlLocalizedDecimalParser;
+use Money\Parser\DecimalMoneyParser;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use PhpStaticAnalysis\Attributes\Returns;
+use PhpStaticAnalysis\Attributes\Throws;
 
 class MoneyFormatter
 {
+    /**
+     * Magnitude suffixes used by formatShort(), indexed by power of one thousand.
+     */
+    private const ABBREVIATIONS = ['', 'K', 'M', 'B', 'T', 'Q'];
+
     public static function formatMoney(
         Money $money,
         string $locale,
@@ -40,24 +47,14 @@ class MoneyFormatter
 
         $money = $value instanceof Money
             ? $value
-            : new Money((int) $value, $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency);
+            : new Money(
+                self::toMinorUnits($value),
+                $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
+            );
 
-        if (! $showCurrencySymbol) {
-            $formatted = self::getNumberFormatter(
-                $locale,
-                NumberFormatter::DECIMAL,
-                $decimals,
-                false
-            )->format($money->getAmount() / 100);
-
-            if ($formatted === false) {
-                return '';
-            }
-
-            return $formatted;
-        }
-
-        return static::formatMoney($money, $locale, $outputStyle, $decimals);
+        // The decimal style leaves out the currency symbol while still placing the decimal point
+        // by the minor unit of the currency.
+        return static::formatMoney($money, $locale, $showCurrencySymbol ? $outputStyle : NumberFormatter::DECIMAL, $decimals);
     }
 
     public static function numberFormat(
@@ -70,12 +67,8 @@ class MoneyFormatter
             return '';
         }
 
-        if (is_float($value) || (is_string($value) && str_contains($value, '.'))) {
-            if ($decimals < 0) {
-                $value = (int) ($value * (10 ** $decimals));
-                $value = (int) ($value * (10 ** abs($decimals)));
-            }
-        } elseif (is_int($value)) {
+        // An int is minor units, anything with a decimal point is already a major amount.
+        if (is_int($value)) {
             $value /= 10 ** $minorDecimals;
         }
 
@@ -99,42 +92,25 @@ class MoneyFormatter
             return '';
         }
 
-        if ($value === 0) {
-            return static::format(0, $currency, $locale, decimals: $decimals);
+        $major = (float) self::toMinorUnits($value) / 10 ** self::getMinorUnit($currency);
+
+        // No need to abbreviate if the amount is less than 1000
+        if (abs($major) < 1000) {
+            return static::format($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
         }
 
-        // No need to abbreviate if the value is less than 1000
-        if ($value < 100000) {
-            $outputStyle = $showCurrencySymbol ? NumberFormatter::CURRENCY : NumberFormatter::DECIMAL;
-
-            return static::format($value, $currency, $locale, $outputStyle, decimals: $decimals);
-        }
-
-        $abbreviated = (string) Number::abbreviate((int) $value / 100, 0, abs($decimals));
-
-        // Split the number and the suffix
-        if (preg_match('/^(?<number>[0-9.]+)(?<suffix>[A-Z])$/', $abbreviated, $matches1) !== 1) {
-            throw new \RuntimeException('Invalid format');
-        }
-
-        $abbreviatedNumber = (float) $matches1['number'];
-        $suffix            = $matches1['suffix'];
-
-        $formattedNumber = static::numberFormat($abbreviatedNumber, $locale, decimals: $decimals);
+        [$mantissa, $suffix] = self::abbreviate($major, $decimals);
 
         if (! $showCurrencySymbol) {
-            return $formattedNumber.$suffix;
+            return static::numberFormat($mantissa, $locale, decimals: $decimals).$suffix;
         }
 
-        // Format the number
-        $formattedCurrency = static::format((int) ($abbreviatedNumber * 100), $currency, $locale, decimals: $decimals);
+        // The suffix goes into the ICU pattern rather than into the formatted output, which leaves
+        // the symbol, its placement, the digits of the locale and its directional marks to ICU.
+        $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
-        // Find the formatted number
-        if (preg_match('/(?<number>[0-9\.,]+)/', $formattedCurrency, $matches2) !== 1) {
-            throw new \RuntimeException('Invalid format');
-        }
-
-        return str_replace($matches2['number'], $formattedNumber.$suffix, $formattedCurrency);
+        return (string) self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $decimals, numberSuffix: $suffix)
+            ->formatCurrency($mantissa, $moneyCurrency->getCode());
     }
 
     public static function parseDecimal(
@@ -147,22 +123,42 @@ class MoneyFormatter
             return '';
         }
 
-        $currency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
+        $currency    = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
+        $moneyString = trim($moneyString);
 
         $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
-        $moneyParser     = new IntlLocalizedDecimalParser($numberFormatter, new ISOCurrencies);
+        $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
-        // Remove grouping separator from the money string
-        // This is needed to fix some parsing issues with small numbers such as
-        // "2,00" with "," left as thousands separator in the wrong place
-        // See: https://github.com/pelmered/larapara/issues/20
-        $formattingRules = self::getFormattingRules($locale, $currency);
-        $moneyString     = str_replace($formattingRules->groupingSeparator, '', $moneyString);
+        if ($parsed === false) {
+            // A grouping separator typed where the decimal separator belongs is the most common way
+            // for user input to miss its locale, so read it as a decimal separator before giving up.
+            // See: https://github.com/pelmered/larapara/issues/20
+            $formattingRules = self::getFormattingRules($locale, $currency);
+
+            if ($formattingRules->groupingSeparator !== ''
+                && str_contains($moneyString, $formattingRules->groupingSeparator)
+                && ! str_contains($moneyString, $formattingRules->decimalSeparator)
+            ) {
+                $parsed = self::parseLocalizedNumber($numberFormatter, str_replace(
+                    $formattingRules->groupingSeparator,
+                    $formattingRules->decimalSeparator,
+                    $moneyString
+                ));
+            }
+        }
+
+        if ($parsed === false) {
+            throw new ParserException('The value must be a valid numeric value.');
+        }
 
         try {
-            return $moneyParser->parse($moneyString, $currency)->getAmount();
-        } catch (ParserException) {
-            throw new ParserException('The value must be a valid numeric value.');
+            // Formatted rather than cast to a string: (string) on a float goes through the
+            // `precision` ini setting, which deforms anything above 14 significant digits.
+            $decimalString = sprintf('%.'.(new ISOCurrencies)->subunitFor($currency).'F', $parsed);
+
+            return (new DecimalMoneyParser(new ISOCurrencies))->parse($decimalString, $currency)->getAmount();
+        } catch (ParserException $e) {
+            throw new ParserException('The value must be a valid numeric value.', 0, $e);
         }
     }
 
@@ -200,8 +196,85 @@ class MoneyFormatter
         return Currency::fromCode($defaultCurrencyCode);
     }
 
-    private static function getNumberFormatter(string $locale, int $style, int $decimals = 2, bool $showCurrencySymbol = true): NumberFormatter
+    /**
+     * The minor unit of the currency, which is how many decimals its amounts carry.
+     */
+    private static function getMinorUnit(Currency|MoneyCurrency $currency): int
     {
+        $isoCurrencies = new ISOCurrencies;
+        $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
+
+        if ($isoCurrencies->contains($moneyCurrency)) {
+            return $isoCurrencies->subunitFor($moneyCurrency);
+        }
+
+        // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data.
+        return $currency instanceof Currency ? $currency->minorUnit ?? 2 : 2;
+    }
+
+    /**
+     * Amounts are whole minor units. Anything else is a mistake we should not silently truncate.
+     */
+    #[Returns('int|numeric-string')]
+    #[Throws(InvalidAmount::class)]
+    private static function toMinorUnits(int|string $value): int|string
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+
+        $amount = trim($value);
+
+        // Numeric, and whole rather than fractional or in exponent notation.
+        if (! is_numeric($amount) || ! ctype_digit(ltrim($amount, '-'))) {
+            throw InvalidAmount::notMinorUnits($value);
+        }
+
+        return $amount;
+    }
+
+    /**
+     * Splits a major amount into a mantissa below one thousand and its magnitude suffix.
+     */
+    #[Returns('array{0: float, 1: string}')]
+    private static function abbreviate(float $major, int $decimals): array
+    {
+        $lastMagnitude = count(self::ABBREVIATIONS) - 1;
+        $magnitude     = min((int) (log10(abs($major)) / 3), $lastMagnitude);
+        $mantissa      = $major / 10 ** ($magnitude * 3);
+
+        // Rounding to the requested decimals can carry the mantissa into the next magnitude.
+        if ($magnitude < $lastMagnitude && abs(round($mantissa, max($decimals, 0))) >= 1000) {
+            $magnitude++;
+            $mantissa /= 1000;
+        }
+
+        return [$mantissa, self::ABBREVIATIONS[$magnitude]];
+    }
+
+    /**
+     * Parses a localized number, or returns false unless the whole string is one.
+     */
+    private static function parseLocalizedNumber(NumberFormatter $numberFormatter, string $value): float|false
+    {
+        $position = 0;
+        $parsed   = $numberFormatter->parse($value, NumberFormatter::TYPE_DOUBLE, $position);
+
+        // ICU stops at the first character it cannot read, so a partial parse would silently drop
+        // the rest of the string. The position counts characters rather than bytes.
+        if ($parsed === false || $position !== mb_strlen($value) || ! is_finite($parsed)) {
+            return false;
+        }
+
+        return $parsed;
+    }
+
+    private static function getNumberFormatter(
+        string $locale,
+        int $style,
+        int $decimals = 2,
+        string $numberSuffix = '',
+    ): NumberFormatter {
         $config = config('larapara');
 
         $numberFormatter = new NumberFormatter($locale, $style);
@@ -209,8 +282,12 @@ class MoneyFormatter
         $isCurrencyStyle = $style === NumberFormatter::CURRENCY || $style === NumberFormatter::CURRENCY_ACCOUNTING;
 
         // Before the decimals, since the pattern carries its own fraction digits.
-        if ($isCurrencyStyle && $showCurrencySymbol && $config['intl_currency_symbol']) {
+        if ($isCurrencyStyle && $config['intl_currency_symbol']) {
             $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
+        }
+
+        if ($numberSuffix !== '') {
+            $numberFormatter->setPattern(self::numberSuffixPattern($numberFormatter->getPattern(), $numberSuffix));
         }
 
         if ($decimals < 0) {
@@ -233,5 +310,16 @@ class MoneyFormatter
     private static function intlCurrencyPattern(string $pattern): string
     {
         return preg_replace('/\x{00A4}+/u', "\u{a4}\u{a4}", $pattern) ?? $pattern;
+    }
+
+    /**
+     * Appends a literal to the number of a pattern, in every subpattern it has.
+     *
+     * The number is the only part of the pattern built from "#" and "0", so the affixes carrying the
+     * currency symbol, the sign and the directional marks of the locale stay where the locale put them.
+     */
+    private static function numberSuffixPattern(string $pattern, string $suffix): string
+    {
+        return preg_replace('/[#0][#0.,]*/', '$0\''.$suffix.'\'', $pattern) ?? $pattern;
     }
 }
