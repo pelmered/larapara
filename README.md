@@ -36,6 +36,7 @@ writes an amount.
 - [Configuration](#configuration)
 - [Storing money in the database](#storing-money-in-the-database)
 - [Formatting and parsing money](#formatting-and-parsing-money)
+- [Validating user input](#validating-user-input)
 - [Currencies](#currencies)
 - [Caching](#caching)
 - [Using LaraPara with Filament](#using-larapara-with-filament)
@@ -97,6 +98,7 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `store.format`            | –                               | `int`                    | How amounts are stored: `int` (minor units, i.e. cents) or `decimal`.                             |
 | `default_currency`        | `MONEY_DEFAULT_CURRENCY`        | `USD`                    | Currency used when nothing else is set.                                                            |
 | `intl_currency_symbol`    | `MONEY_INTL_CURRENCY_SYMBOL`    | `false`                  | Use ISO 4217 codes (`USD`, `EUR`, `SEK`) instead of symbols (`$`, `€`, `kr`).                      |
+| `parse.strict`            | `MONEY_PARSE_STRICT`            | `false`                  | Accept only what the locale itself writes when parsing. See [strict mode](#strict-mode).           |
 | `currency_provider`       | –                               | `ISOCurrenciesProvider`  | Class that provides the currency list. See [custom currency lists](#custom-currency-lists).        |
 | `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of ISO codes. Comma separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `UnsupportedCurrency`. |
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
@@ -396,6 +398,7 @@ public static function parseDecimal(
     Currency|MoneyCurrency $currency,
     string $locale,
     int $decimals = 2,
+    ?bool $strict = null,
 ): string
 ```
 
@@ -439,6 +442,25 @@ MoneyFormatter::parseDecimal('1.234,56', Currency::fromCode('USD'), 'en_US'); //
 MoneyFormatter::parseDecimal('1,234.56', Currency::fromCode('SEK'), 'sv_SE'); // ParserException
 MoneyFormatter::parseDecimal('1,234.56', Currency::fromCode('EUR'), 'de_DE'); // ParserException
 ```
+
+#### Strict mode
+
+Forgiving a separator is right for a form a person fills in, and wrong for a CSV import or an API endpoint,
+where you would rather the client fixed its payload. `strict` turns the second reading off, so only what the
+locale itself writes is accepted:
+
+```php
+MoneyFormatter::parseDecimal('1.5', Currency::fromCode('SEK'), 'sv_SE');               // '150'
+MoneyFormatter::parseDecimal('1.5', Currency::fromCode('SEK'), 'sv_SE', strict: true); // ParserException
+
+MoneyFormatter::parseDecimal('1 234,56', Currency::fromCode('SEK'), 'sv_SE', strict: true); // '123456'
+MoneyFormatter::parseDecimal('1234,56', Currency::fromCode('SEK'), 'sv_SE', strict: true);  // '123456'
+```
+
+It defaults to `config('larapara.parse.strict')`, which ships as `false`. Since it is an argument as well as
+a config key, a lenient form and a strict import can live in the same application. Note that strict mode
+does not require a grouping separator, and does not insist on the exact space character the locale prefers
+— ICU accepts an ordinary space where `sv_SE` writes a non-breaking one, in both modes.
 
 ```php
 use Pelmered\LaraPara\Currencies\Currency;
@@ -508,6 +530,89 @@ public static function getDefaultCurrency(): Currency
 
 ```php
 MoneyFormatter::getDefaultCurrency()->getCode(); // 'USD'
+```
+
+## Validating user input
+
+Two validation rules, so an amount and a currency coming from a request can be checked before anything is
+parsed or saved.
+
+```php
+use Pelmered\LaraPara\Rules\MoneyString;
+use Pelmered\LaraPara\Rules\SupportedCurrency;
+
+$validated = $request->validate([
+    'price'          => ['required', new MoneyString($request->input('price_currency'))],
+    'price_currency' => ['required', new SupportedCurrency],
+]);
+```
+
+Both rules pass an empty value, so `required` and `nullable` stay in charge of whether a field may be empty.
+
+### `MoneyString`
+
+Validates that a string is an amount `parseDecimal()` can read, in the same locale and under the same rules.
+
+```php
+new MoneyString(
+    Currency|MoneyCurrency|string|null $currency = null,  // defaults to config('larapara.default_currency')
+    ?string $locale = null,                               // defaults to app()->getLocale()
+    ?bool $strict = null,                                 // defaults to config('larapara.parse.strict')
+)
+```
+
+```php
+// Lenient, as parseDecimal is by default
+'price' => [new MoneyString('SEK', 'sv_SE')],              // '1.5' passes, and parses as 1,50
+
+// Strict, for an import or an API
+'price' => [new MoneyString('SEK', 'sv_SE', strict: true)], // '1.5' fails
+```
+
+The failure message shows the shape it expects rather than describing it, built from the locale and currency
+it was given — *"The price field must be a valid amount, such as 1 234,56."*
+
+Whether the currency itself is supported is `SupportedCurrency`'s business: an unsupported one here does not
+fail the amount, because the scale of a currency does not decide whether a string is a number. That way a bad
+currency and a bad amount each report their own problem, and passing `$request->input('price_currency')`
+straight in cannot turn into an exception.
+
+### `SupportedCurrency`
+
+Validates that a currency code is one this application supports — that is, one `available_currencies` allows.
+The code is trimmed and upper-cased first, exactly as the casts normalize it on write, so anything this rule
+passes can be stored.
+
+```php
+new SupportedCurrency(?array $currencyCodes = null)
+```
+
+```php
+'price_currency' => ['required', new SupportedCurrency],
+
+// Offer fewer currencies on one form than the application supports
+'payout_currency' => ['required', new SupportedCurrency(['USD', 'EUR'])],
+```
+
+A list narrowed to a code `available_currencies` does not have would leave a field nothing could satisfy, so
+it throws `UnsupportedCurrency` where it is written instead of failing every submission.
+
+Build the field's options from the same list, and the two cannot drift apart:
+
+```php
+use Pelmered\LaraPara\Currencies\CurrencyRepository;
+
+CurrencyRepository::getAvailableCurrencies()->toSelectArray();
+// ['USD' => 'USD - US Dollar', 'EUR' => 'EUR - Euro', 'SEK' => 'SEK - Swedish Krona']
+```
+
+### Messages
+
+The messages live in `resources/lang/en/validation.php` under the `larapara` namespace. Publish them to
+override:
+
+```bash
+php artisan vendor:publish --tag="larapara-translations"
 ```
 
 ## Currencies
