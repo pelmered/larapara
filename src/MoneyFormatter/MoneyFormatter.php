@@ -130,18 +130,23 @@ class MoneyFormatter
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
         if ($parsed === false) {
-            // A grouping separator typed where the decimal separator belongs is the most common way
-            // for user input to miss its locale, so read it as a decimal separator before giving up.
-            // See: https://github.com/pelmered/larapara/issues/20
             $formattingRules = self::getFormattingRules($locale, $currency);
 
-            if ($formattingRules->groupingSeparator !== ''
-                && str_contains($moneyString, $formattingRules->groupingSeparator)
-                && ! str_contains($moneyString, $formattingRules->decimalSeparator)
-            ) {
+            // A grouping separator out of position is the most common way for user input to miss its
+            // locale, so give it a second reading before giving up.
+            // See: https://github.com/pelmered/larapara/issues/20
+            if ($formattingRules->groupingSeparator !== '' && str_contains($moneyString, $formattingRules->groupingSeparator)) {
+                // A grouping separator carries no value of its own, so it is dropped — except a dot,
+                // which is the decimal separator of nearly every keyboard and spreadsheet people
+                // type numbers into. Dropping that would turn 1.5 into 15 and leave no way to type a
+                // decimal point at all, so in the locales that group with dots it is read as one.
+                $reading = $formattingRules->groupingSeparator === '.'
+                    ? $formattingRules->decimalSeparator
+                    : '';
+
                 $parsed = self::parseLocalizedNumber($numberFormatter, str_replace(
                     $formattingRules->groupingSeparator,
-                    $formattingRules->decimalSeparator,
+                    $reading,
                     $moneyString
                 ));
             }

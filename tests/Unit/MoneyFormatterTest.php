@@ -207,18 +207,31 @@ it('parses decimal money in usd with intl symbol', function (mixed $input, strin
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
 
-// A grouping separator typed where the decimal separator belongs is read as a decimal separator,
-// rather than dropped, which would multiply the amount by a hundred.
-// See: https://github.com/pelmered/larapara/issues/20
-it('parses a decimal separator typed as the grouping separator', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+// A grouping separator carries no value of its own, so one out of position is dropped rather than
+// refused. See: https://github.com/pelmered/larapara/issues/20
+it('parses a grouping separator that is out of position', function (string $input, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
-    'grouping separator in the decimals' => ['en_US', 'USD', '2,00', '200'],
-    'no grouping position at all'        => ['en_US', 'USD', '12,34', '1234'],
-    'dot grouping locale'                => ['de_DE', 'EUR', '1.5', '150'],
-    'genuine grouping is left alone'     => ['en_US', 'USD', '1,234', '123400'],
-    'genuine dot grouping is left alone' => ['de_DE', 'EUR', '1.234', '123400'],
+    'in the decimals'                => ['2,00', '20000'],
+    'no grouping position at all'    => ['12,34', '123400'],
+    'genuine grouping is left alone' => ['1,234', '123400'],
+    'with a decimal separator'       => ['1,234.56', '123456'],
+]);
+
+// A dot is the decimal separator of nearly every keyboard and spreadsheet, so in the locales that
+// group with dots one out of grouping position is read as a decimal separator rather than dropped.
+// Dropping it multiplied the amount by ten or a hundred, and left no way to type a decimal point.
+it('parses a dot as a decimal separator in a locale that groups with dots', function (string $input, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('EUR'), 'de_DE'))
+        ->toBe($expectedOutput);
+})->with([
+    'one decimal'                    => ['1.5', '150'],
+    'two decimals'                   => ['1.50', '150'],
+    'no grouping position at all'    => ['12.34', '1234'],
+    'genuine grouping is left alone' => ['1.234', '123400'],
+    'the decimal separator itself'   => ['1,5', '150'],
+    'both separators'                => ['1.234,56', '123456'],
 ]);
 
 it('rejects a string that is not a number in its entirety', function (string $locale, string $input): void {
