@@ -427,6 +427,19 @@ A separator that *is* in a grouping position always keeps its meaning, so `'1.23
 in `en_US` are both one thousand two hundred and thirty four. Only a separator the locale has already refused
 reaches the rules above, which is why the two never contradict each other.
 
+A locale's grouping separator is one member of a class, and a keyboard usually produces a different member of
+it: `sv_SE` groups with a no-break space, `fr_FR` with a narrow one, `de_CH` with a right single quotation
+mark, while people type a plain space and a plain apostrophe. Any member of the class is read as grouping, so
+`'1 234,56'` and `"1'234.56"` are understood as readily as the characters ICU would have written:
+
+```php
+MoneyFormatter::parseDecimal('2 00', Currency::fromCode('SEK'), 'sv_SE');   // '20000', typed with a space
+MoneyFormatter::parseDecimal("2'00", Currency::fromCode('CHF'), 'de_CH');   // '20000', typed with an apostrophe
+```
+
+The class is the one the locale's own separator belongs to, not a free-for-all — a space is not a grouping
+separator in a locale that groups with a comma.
+
 #### What is still refused
 
 The rules read a separator that is merely out of place. They do not rescue a string that is a number in some
