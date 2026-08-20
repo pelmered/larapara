@@ -36,6 +36,7 @@ writes an amount.
 - [Configuration](#configuration)
 - [Storing money in the database](#storing-money-in-the-database)
 - [Formatting and parsing money](#formatting-and-parsing-money)
+  - [Where the formatting comes from](#where-the-formatting-comes-from)
 - [Validating user input](#validating-user-input)
 - [Currencies](#currencies)
 - [Caching](#caching)
@@ -67,7 +68,8 @@ considered stable API and will not change without a major version bump.
 
 - PHP 8.2 or higher
 - Laravel 11.24 or higher
-- [PHP Internationalization extension (intl)](https://www.php.net/manual/en/intro.intl.php)
+- [PHP Internationalization extension (intl)](https://www.php.net/manual/en/intro.intl.php), which is
+  built on [ICU](https://icu.unicode.org/) — see [Where the formatting comes from](#where-the-formatting-comes-from)
 - A database column for the amount (integer for minor units, or decimal) plus a column for the currency
 
 ## Installation
@@ -250,6 +252,60 @@ otherwise.
 For all methods that take `$decimals`: a positive value is the number of decimals, and a negative value is
 the number of significant digits, so `-2` on `12345678` gives `$120,000`. This only affects the formatted
 output; the amount itself is left alone.
+
+### Where the formatting comes from
+
+Every symbol, separator and digit in the output of this package comes from [ICU](https://icu.unicode.org/),
+the internationalization library the `intl` extension is built on. ICU carries the
+[CLDR](https://cldr.unicode.org/) locale database — how each locale writes numbers, which currency symbol it
+uses and where it puts it — and LaraPara does not second-guess it.
+
+**ICU is a property of your PHP build, not of this package.** The extension links against whatever ICU the
+host was compiled with, so the version differs between operating systems, distributions and PHP builds:
+
+```bash
+php -r 'printf("ICU %s, CLDR %s\n", INTL_ICU_VERSION, INTL_ICU_DATA_VERSION);'
+```
+
+CLDR is revised with every ICU release, and monetary formatting is one of the things that gets revised.
+Between versions a currency symbol may change (`US$` ⇄ `$`), the space before it may become a different kind
+of space, and a locale may switch which apostrophe or space it groups with. **So the exact output of a
+formatting call is not stable across PHP builds** — and there is no minimum ICU version to require, because
+the differences are in the data rather than in what ICU can do.
+
+What *is* stable is the round trip. `parseDecimal()` reads a locale's separators from the same ICU that
+`format()` writes them with, so whatever your ICU produces, your ICU parses — and any member of a separator's
+character class is understood regardless of which one CLDR currently names.
+
+#### Writing tests against formatted output
+
+The examples in this README use ordinary spaces for readability, but real output does not. `sv_SE` and
+`de_DE` group with a non-breaking space (U+00A0), `fr_FR` with a narrow one (U+202F), and several locales put
+directional marks around the currency symbol. Asserting a literal string will fail on somebody else's ICU —
+so take the volatile part from ICU too, and assert your own logic:
+
+```php
+use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
+
+// Fragile: that space is a U+00A0 today, and the symbol may gain or lose one
+expect(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'))->toBe('1 234,56 kr');
+
+// Robust: the separators come from the same place the formatter got them
+$rules = MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('SEK'));
+
+expect(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'))
+    ->toContain('1'.$rules->groupingSeparator.'234'.$rules->decimalSeparator.'56')
+    ->toContain($rules->currencySymbol);
+
+// Or normalise the spaces away when the exact character is not what you are testing
+$normalise = static fn (string $value): string => str_replace(["\u{00a0}", "\u{202f}"], ' ', $value);
+
+expect($normalise(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE')))->toBe('1 234,56 kr');
+```
+
+If you test on more than one operating system, expect ICU to differ between them — this package's own CI
+prints `INTL_ICU_VERSION` in every job for exactly that reason.
 
 ### `formatMoney`
 

@@ -36,6 +36,12 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: intl, fileinfo, zip, pdo, sqlite, pdo_sqlite, bcmath
 
+      # The intl extension links against whatever ICU the host was built with, so its CLDR data —
+      # separators, symbols, digit sets — differs per runner. Logged so that output drifting between
+      # platforms is visible here rather than needing a bisect.
+      - name: Report ICU version
+        run: php -r 'printf("PHP %s, ICU %s, CLDR %s%s", PHP_VERSION, INTL_ICU_VERSION, INTL_ICU_DATA_VERSION, PHP_EOL);'
+
       - name: Install dependencies
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
@@ -73,6 +79,13 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: intl, fileinfo, zip, pdo, sqlite, pdo_sqlite, bcmath
+
+      # The intl extension links against whatever ICU the host was built with, so its CLDR data —
+      # separators, symbols, digit sets — differs per runner. Logged so that output drifting between
+      # platforms is visible here rather than needing a bisect.
+      - name: Report ICU version
+        run: php -r 'printf("PHP %s, ICU %s, CLDR %s%s", PHP_VERSION, INTL_ICU_VERSION, INTL_ICU_DATA_VERSION, PHP_EOL);'
+
           coverage: none
 
       - name: Pin Laravel version
