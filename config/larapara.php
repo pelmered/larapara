@@ -65,23 +65,6 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | Number format input
-    |---------------------------------------------------------------------------
-    |
-    | Whether MoneyFormatter::numberFormat() reads its value as minor units, the
-    | way format() and formatShort() read theirs: 123456 is 1,234.56 with this on
-    | and 123,456.00 with it off. Set it to false where the method is used to
-    | format plain numbers rather than amounts.
-    |
-    | Every numberFormat() call takes a `minorUnits` argument that overrides this.
-    |
-    */
-    'number_format' => [
-        'minor_units' => env('MONEY_NUMBER_FORMAT_MINOR_UNITS', true),
-    ],
-
-    /*
-    |---------------------------------------------------------------------------
     | Currency list
     |---------------------------------------------------------------------------
     |

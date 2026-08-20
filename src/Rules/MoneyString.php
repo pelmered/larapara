@@ -68,7 +68,7 @@ class MoneyString implements ValidationRule
     {
         // An amount the locale writes the way this one does, so the message shows the shape expected
         // rather than describing it.
-        $example = MoneyFormatter::format(123456, $currency, $locale, showCurrencySymbol: false);
+        $example = MoneyFormatter::formatAmount(123456, $currency, $locale, showCurrencySymbol: false);
 
         $fail('larapara::validation.money')->translate(['example' => $example]);
     }

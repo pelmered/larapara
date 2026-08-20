@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Pelmered\LaraPara\MoneyFormatter;
 
 use Locale;
+use Money\Currencies;
+use Money\Currencies\AggregateCurrencies;
+use Money\Currencies\CurrencyList;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
 use Money\Exception\ParserException;
@@ -14,6 +17,7 @@ use Money\Parser\DecimalMoneyParser;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
 
@@ -86,7 +90,7 @@ class MoneyFormatter
         return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
     }
 
-    public static function format(
+    public static function formatAmount(
         null|int|string|Money $value,
         Currency|MoneyCurrency $currency,
         string $locale,
@@ -98,41 +102,42 @@ class MoneyFormatter
             return '';
         }
 
-        // Taken from the currency the caller passed rather than from the Money below, since only this
-        // one carries the minor unit of a currency ICU has no data for.
-        $decimals ??= self::getMinorUnit($currency);
+        if ($value instanceof Money) {
+            $currency = $value->getCurrency();
+            $value    = $value->getAmount();
+        }
 
-        $money = $value instanceof Money
-            ? $value
-            : new Money(
-                self::toMinorUnits($value),
-                $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
-            );
+        $minorUnit = self::getMinorUnit($currency);
+        $decimals ??= $minorUnit;
 
-        // The decimal style leaves out the currency symbol while still placing the decimal point
-        // by the minor unit of the currency.
-        return static::formatMoney($money, $locale, $showCurrencySymbol ? $outputStyle : NumberFormatter::DECIMAL, $decimals);
+        if (! $showCurrencySymbol) {
+            // Nothing here needs ICU's data for the currency — only the minor unit, to place the
+            // decimal point — so this reads a currency ICU has never heard of, crypto included.
+            return static::formatNumber((float) self::toMinorUnits($value) / 10 ** $minorUnit, $locale, $decimals);
+        }
+
+        $money = new Money(
+            self::toMinorUnits($value),
+            $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
+        );
+
+        return static::formatMoney($money, $locale, $outputStyle, $decimals);
     }
 
-    public static function numberFormat(
+    /**
+     * Formats the number it is given, in the locale it is given.
+     *
+     * A number rather than an amount: nothing here is scaled, since a count of minor units means
+     * nothing without the currency that says how many of them make a unit. Amounts go through
+     * formatAmount(), which takes that currency.
+     */
+    public static function formatNumber(
         null|int|float|string $value,
         string $locale,
         int $decimals = 2,
-        int $minorDecimals = 2,
-        ?bool $minorUnits = null,
     ): string {
         if (! is_numeric($value)) {
             return '';
-        }
-
-        // Whether the value counts minor units is the caller's to state, since the PHP type cannot:
-        // Money::getAmount() returns a numeric string and a form field arrives as one too, while the
-        // same amount read from an integer column is an int, and reading the type made those differ
-        // by a factor of a hundred.
-        $minorUnits ??= (bool) config('larapara.number_format.minor_units', true);
-
-        if ($minorUnits) {
-            $value = (float) $value / 10 ** $minorDecimals;
         }
 
         $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
@@ -159,7 +164,7 @@ class MoneyFormatter
 
         // No need to abbreviate if the amount is less than 1000
         if (abs($major) < 1000) {
-            return static::format($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
+            return static::formatAmount($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
         }
 
         $mantissaDecimals = $decimals ?? self::ABBREVIATED_DECIMALS;
@@ -167,7 +172,7 @@ class MoneyFormatter
         [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals);
 
         if (! $showCurrencySymbol) {
-            return static::numberFormat($mantissa, $locale, decimals: $mantissaDecimals, minorUnits: false).$suffix;
+            return static::formatNumber($mantissa, $locale, decimals: $mantissaDecimals).$suffix;
         }
 
         // The suffix goes into the ICU pattern rather than into the formatted output, which leaves
@@ -190,12 +195,14 @@ class MoneyFormatter
 
         $strict ??= (bool) config('larapara.parse.strict', false);
 
+        // Read before the currency is narrowed to a Money one, which carries no minor unit of its own.
+        $minorUnit   = self::getMinorUnit($currency);
         $currency    = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
         $moneyString = trim($moneyString);
 
         // The scale of the result comes from the currency, in the parser below: a number formatter
         // reads every decimal the string carries whatever its fraction digits are set to.
-        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, self::getMinorUnit($currency));
+        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $minorUnit);
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
         if ($parsed === false && ! $strict) {
@@ -219,10 +226,29 @@ class MoneyFormatter
             // last representable digit of the double would decide it instead.
             $decimalString = sprintf('%.'.self::PARSE_DECIMAL_PLACES.'F', $parsed);
 
-            return (new DecimalMoneyParser(new ISOCurrencies))->parse($decimalString, $currency)->getAmount();
+            return (new DecimalMoneyParser(self::parseCurrencies($currency, $minorUnit)))
+                ->parse($decimalString, $currency)
+                ->getAmount();
         } catch (ParserException $parserException) {
             throw new ParserException('The value must be a valid numeric value.', 0, $parserException);
         }
+    }
+
+    /**
+     * The currency data the parser scales its result by.
+     *
+     * ISO 4217 first, since it is authoritative for the currencies it covers, with the minor unit of
+     * the currency being parsed behind it — otherwise a currency ISO has never heard of could be
+     * formatted but not read back, and the exception for it is not one a caller can catch as a
+     * parse failure.
+     */
+    #[Param(minorUnit: 'int<0, max>')]
+    private static function parseCurrencies(MoneyCurrency $currency, int $minorUnit): Currencies
+    {
+        return new AggregateCurrencies([
+            new ISOCurrencies,
+            new CurrencyList([$currency->getCode() => $minorUnit]),
+        ]);
     }
 
     public static function getFormattingRules(string $locale, Currency|MoneyCurrency $currency): CurrencyFormattingRules
@@ -265,17 +291,18 @@ class MoneyFormatter
     /**
      * The minor unit of the currency, which is how many decimals its amounts carry.
      */
+    #[Returns('int<0, max>')]
     private static function getMinorUnit(Currency|MoneyCurrency $currency): int
     {
         $isoCurrencies = new ISOCurrencies;
         $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
         if ($isoCurrencies->contains($moneyCurrency)) {
-            return $isoCurrencies->subunitFor($moneyCurrency);
+            return max($isoCurrencies->subunitFor($moneyCurrency), 0);
         }
 
         // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data.
-        return $currency instanceof Currency ? $currency->minorUnit ?? 2 : 2;
+        return $currency instanceof Currency ? max($currency->minorUnit ?? 2, 0) : 2;
     }
 
     /**

@@ -65,7 +65,7 @@ the setting.
 
 ## Amounts are formatted with the fraction digits of their currency
 
-`format()`, `formatMoney()` and `formatShort()` took two decimals for every currency and now take the
+`formatAmount()`, `formatMoney()` and `formatShort()` took two decimals for every currency and now take the
 minor unit of the currency, which changes the output for 39 of the 179 bundled currencies: `¥1,000.00`
 is `¥1,000`, and `BHD 1,234.57` for 1234567 fils is `BHD 1,234.567`. Pass `decimals:` to get the old
 number back for a specific call. `parseDecimal()` already scaled by the currency, so formatting and
@@ -84,22 +84,54 @@ fraction digits are set to, so the scale always came from the currency. Calls th
 have to drop it — `parseDecimal($value, $currency, $locale, $decimals, $strict)` becomes
 `parseDecimal($value, $currency, $locale, $strict)`.
 
-## `numberFormat()` is told what its value counts
+## Amounts and numbers are formatted by different methods
 
-`int 123456` was `1,234.56` while `'123456'` was `123,456.00` — the same amount a hundred times apart,
-decided by the PHP type. Since `Money::getAmount()` returns a numeric string and a form field arrives as
-one, the natural call was the wrong one. A `minorUnits` argument now decides, defaulting to the new
-`number_format.minor_units` config key, which ships as `true`:
+`formatNumber()` had two jobs, and the PHP type of its value decided which one: `123456` was `1,234.56`
+(minor units) while `'123456'` was `123,456.00` (a plain number) — the same amount a hundred times apart,
+and `Money::getAmount()` returns the string form. Neither job is gone, but each has its own method now,
+named for what it takes:
+
+| Was | Is | Takes |
+|---|---|---|
+| `format()` | `formatAmount()` | minor units, plus the currency that scales them |
+| `formatNumber()` | `formatNumber()` | a number, formatted as given |
+
+- `formatAmount()` is `format()` under a new name; every argument is unchanged.
+- `formatNumber()` scales nothing: `formatNumber(1234.56, 'en_US')` is `1,234.56` and
+  `formatNumber(1234, 'en_US')` is `1,234.00`. Its `$minorDecimals` parameter is gone, and so is the
+  `minorUnits` argument and the `number_format.minor_units` config key of the previous iteration.
+- An amount without a currency symbol — what a minor-unit value usually wants — is
+  `formatAmount($value, $currency, $locale, showCurrencySymbol: false)`.
 
 ```php
-MoneyFormatter::numberFormat('123456', 'en_US');                   // 1,234.56  (was 123,456.00)
-MoneyFormatter::numberFormat(1234.56, 'en_US');                    // 12.35     (was 1,234.56)
-MoneyFormatter::numberFormat(1234.56, 'en_US', minorUnits: false); // 1,234.56
+// minor units of an amount
+MoneyFormatter::formatAmount(123456, $usd, 'en_US');                             // $1,234.56
+MoneyFormatter::formatAmount(123456, $usd, 'en_US', showCurrencySymbol: false);  // 1,234.56
+
+// a number
+MoneyFormatter::formatNumber(1234.56, 'en_US');                                  // 1,234.56
 ```
 
-Set `number_format.minor_units` to `false` in the config if the method is used for plain numbers rather
-than amounts in your application, or pass `minorUnits:` per call. `$minorDecimals` is only consulted
-when the value counts minor units.
+Nothing guesses any more: a currency in the call means the value counts that currency's minor units, and
+no currency means it is a number.
+
+## An amount in a currency outside ISO 4217 formats and parses
+
+`formatAmount(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
+currency, because it placed the decimal point from ISO 4217 data. The symbol is the only part that needs
+ICU's data for the currency, so without it the minor unit of the currency is enough:
+
+```php
+MoneyFormatter::formatAmount(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
+// 1.00000000
+
+MoneyFormatter::parseDecimal('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
+```
+
+`parseDecimal()` scales by the same minor unit, so the round trip holds for those currencies too. This
+also fixes the `MoneyString` validation rule, which raised `UnknownCurrencyException` out of the parser
+for a crypto currency instead of reporting a validation failure. Formatting *with* a symbol still throws:
+ICU has no symbol to give.
 
 ## The currency column is never nullable
 
@@ -173,11 +205,11 @@ Codes from the config are trimmed and upper-cased before use, so `MONEY_AVAILABL
 works. A code the currency provider does not know now throws `UnsupportedCurrency` naming that code,
 instead of `ErrorException: Undefined array key` on the first currency read.
 
-## `MoneyFormatter::format()` refuses an amount that is not whole minor units
+## `MoneyFormatter::formatAmount()` refuses an amount that is not whole minor units
 
-`format()` cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not a number'` as `$0.00`.
+`formatAmount()` cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not a number'` as `$0.00`.
 Anything that is not whole minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`. If you
-were passing a major-unit amount, multiply it by the minor unit first, or use `numberFormat()`.
+were passing a major-unit amount, multiply it by the minor unit first, or use `formatNumber()`.
 
 ## `MoneyFormatter::parseDecimal()` rejects what it used to truncate
 
@@ -199,7 +231,7 @@ were passing a major-unit amount, multiply it by the minor unit first, or use `n
 
 ## `MoneyFormatter::formatShort()` uses the minor unit of the currency
 
-It divided by a hardcoded 100, so it disagreed with `format()` for the 39 bundled currencies whose minor
+It divided by a hardcoded 100, so it disagreed with `formatAmount()` for the 39 bundled currencies whose minor
 unit is not 2 — JPY came out a hundred times low, BHD ten times high. Abbreviated output changes for those
 currencies, and the "format in full below 1000" threshold is now 1000 of the currency's major unit rather
 than 100000 minor units.
@@ -212,16 +244,16 @@ amount threw `RuntimeException('Invalid format')`. Locales whose digits are not 
 Negative amounts are abbreviated now instead of always being formatted in full, and
 `formatShort(0, ..., showCurrencySymbol: false)` no longer shows a currency symbol.
 
-## `format(..., showCurrencySymbol: false)` uses the minor unit of the currency
+## `formatAmount(..., showCurrencySymbol: false)` uses the minor unit of the currency
 
-It divided by a hardcoded 100 whatever the currency, so `format(1234, JPY, showCurrencySymbol: false)` gave
-`12.34` and now gives `1,234.00`. For a crypto currency it now throws `UnknownCurrencyException`, like
-`format()` itself does; use `numberFormat()` with the currency's minor unit for those.
+It divided by a hardcoded 100 whatever the currency, so
+`formatAmount(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234.00`. A currency
+outside ISO 4217 works here too — see the section on that above.
 
-## `numberFormat()` with negative decimals
+## `formatNumber()` with negative decimals
 
 Negative decimals are significant digits. The value was scaled through an intermediate `(int)` cast first,
-which zeroed anything below the scale factor: `numberFormat(12.34, 'en_US', decimals: -3)` returned `'0'`
+which zeroed anything below the scale factor: `formatNumber(12.34, 'en_US', decimals: -3)` returned `'0'`
 and now returns `'12.3'`. The documented cases are unchanged.
 
 
@@ -327,11 +359,11 @@ MONEY_AVAILABLE_CURRENCIES=USD,EUR,GBP
 
 ### `formatAsDecimal()` is removed
 
-`formatAsDecimal()` has been removed. Use `numberFormat()` instead. The method signature is the same except the second parameter(currency) is removed. 
+`formatAsDecimal()` has been removed. Use `formatNumber()` instead. The method signature is the same except the second parameter(currency) is removed. 
 
 #### Example:
 ```php
 MoneyFormatter::formatAsDecimal(123456, Currency::fromCode('USD')); // Output: $1,234.56
 // should be changed to:
-MoneyFormatter::numberFormat(123456, 'en_US'); // Output: 1,234.56
+MoneyFormatter::formatNumber(123456, 'en_US'); // Output: 1,234.56
 ```

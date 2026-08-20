@@ -56,7 +56,7 @@ it('parses a number written the way its locale writes it', function (string $loc
 // An amount formatted by this package has to parse back to the amount it came from.
 it('parses back what it formatted', function (string $locale, string $currency, int $minorUnit): void {
     foreach ([1, 999, 1999, 123456, 100000000, -1999] as $amount) {
-        $formatted = MoneyFormatter::format(
+        $formatted = MoneyFormatter::formatAmount(
             $amount,
             Currency::fromCode($currency),
             $locale,

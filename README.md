@@ -102,7 +102,6 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `default_currency`        | `MONEY_DEFAULT_CURRENCY`        | `USD`                    | Currency used when nothing else is set.                                                            |
 | `intl_currency_symbol`    | `MONEY_INTL_CURRENCY_SYMBOL`    | `false`                  | Use ISO 4217 codes (`USD`, `EUR`, `SEK`) instead of symbols (`$`, `€`, `kr`).                      |
 | `parse.strict`            | `MONEY_PARSE_STRICT`            | `false`                  | Accept only what the locale itself writes when parsing. See [strict mode](#strict-mode).           |
-| `number_format.minor_units` | `MONEY_NUMBER_FORMAT_MINOR_UNITS` | `true`             | Whether `numberFormat()` reads its value as minor units. See [`numberFormat`](#numberformat).       |
 | `currency_provider`       | –                               | `ISOCurrenciesProvider`  | Class that provides the currency list. See [custom currency lists](#custom-currency-lists).        |
 | `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of ISO codes. Comma separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `UnsupportedCurrency`. |
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
@@ -118,7 +117,7 @@ Locale is not configured in this package. `MoneyFormatter` takes the locale as a
 so you decide per call whether to use the application locale, the user's preferred locale, or a fixed one:
 
 ```php
-MoneyFormatter::format($post->price, $post->price_currency, app()->getLocale());
+MoneyFormatter::formatAmount($post->price, $post->price_currency, app()->getLocale());
 ```
 
 ## Storing money in the database
@@ -293,7 +292,7 @@ formatting call is not stable across PHP builds** — and there is no minimum IC
 the differences are in the data rather than in what ICU can do.
 
 What *is* stable is the round trip. `parseDecimal()` reads a locale's separators from the same ICU that
-`format()` writes them with, so whatever your ICU produces, your ICU parses — and any member of a separator's
+`formatAmount()` writes them with, so whatever your ICU produces, your ICU parses — and any member of a separator's
 character class is understood regardless of which one CLDR currently names.
 
 #### Writing tests against formatted output
@@ -308,19 +307,19 @@ use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 // Fragile: that space is a U+00A0 today, and the symbol may gain or lose one
-expect(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'))->toBe('1 234,56 kr');
+expect(MoneyFormatter::formatAmount(123456, Currency::fromCode('SEK'), 'sv_SE'))->toBe('1 234,56 kr');
 
 // Robust: the separators come from the same place the formatter got them
 $rules = MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('SEK'));
 
-expect(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'))
+expect(MoneyFormatter::formatAmount(123456, Currency::fromCode('SEK'), 'sv_SE'))
     ->toContain('1'.$rules->groupingSeparator.'234'.$rules->decimalSeparator.'56')
     ->toContain($rules->currencySymbol);
 
 // Or normalise the spaces away when the exact character is not what you are testing
 $normalise = static fn (string $value): string => str_replace(["\u{00a0}", "\u{202f}"], ' ', $value);
 
-expect($normalise(MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE')))->toBe('1 234,56 kr');
+expect($normalise(MoneyFormatter::formatAmount(123456, Currency::fromCode('SEK'), 'sv_SE')))->toBe('1 234,56 kr');
 ```
 
 If you test on more than one operating system, expect ICU to differ between them — this package's own CI
@@ -354,12 +353,12 @@ MoneyFormatter::formatMoney(new Money(123456, new Currency('SEK')), 'sv_SE'); //
 MoneyFormatter::formatMoney(new Money(123456, new Currency('JPY')), 'en_US'); // ¥123,456
 ```
 
-### `format`
+### `formatAmount`
 
 Formats a raw amount or a `Money` object, with or without the currency symbol.
 
 ```php
-public static function format(
+public static function formatAmount(
     null|int|string|Money $value,
     Currency|MoneyCurrency $currency,
     string $locale,
@@ -381,68 +380,65 @@ public static function format(
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
-MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US'); // $1,234.56
-MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'); // 1 234,56 kr
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US'); // $1,234.56
+MoneyFormatter::formatAmount(123456, Currency::fromCode('SEK'), 'sv_SE'); // 1 234,56 kr
 
-MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1,234.56
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1,234.56
 
-MoneyFormatter::format(12345, Currency::fromCode('JPY'), 'en_US');  // ¥12,345    (no minor unit)
-MoneyFormatter::format(12345, Currency::fromCode('BHD'), 'en_US');  // BHD 12.345 (three)
+MoneyFormatter::formatAmount(12345, Currency::fromCode('JPY'), 'en_US');  // ¥12,345    (no minor unit)
+MoneyFormatter::formatAmount(12345, Currency::fromCode('BHD'), 'en_US');  // BHD 12.345 (three)
 
-MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 0);  // $1,235
-MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 2);  // $1,234.56
-MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: -2); // $1,200
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', decimals: 0);  // $1,235
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', decimals: 2);  // $1,234.56
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', decimals: -2); // $1,200
 
 $money = new \Money\Money(123456, new \Money\Currency('EUR'));
-MoneyFormatter::format($money, Currency::fromCode('EUR'), 'de_DE'); // 1.234,56 €
+MoneyFormatter::formatAmount($money, Currency::fromCode('EUR'), 'de_DE'); // 1.234,56 €
 ```
 
-### `numberFormat`
+### `formatNumber`
 
 Formats a number into a localized numeric string, without any currency.
 
 ```php
-public static function numberFormat(
+public static function formatNumber(
     null|int|float|string $value,
     string $locale,
     int $decimals = 2,
-    int $minorDecimals = 2,
-    ?bool $minorUnits = null,
 ): string
 ```
 
-- `$value`: the value to format. Non-numeric input returns an empty string.
+- `$value`: the number to format. Non-numeric input returns an empty string.
 - `$decimals`: decimals, or significant digits when negative.
-- `$minorDecimals`: how many minor unit decimals the value carries. Only used when `$minorUnits` is true.
-- `$minorUnits`: whether the value counts minor units, defaulting to `number_format.minor_units` (`true`).
 
-The unit of the value is what the call says it is, not what its PHP type suggests: `123456` and
-`'123456'` are the same amount, and `Money::getAmount()` returns a string. Set
-`number_format.minor_units` to `false` where the method formats plain numbers rather than amounts, or
-pass `minorUnits:` per call.
+This formats the number it is given and scales nothing. A count of minor units means nothing without
+the currency that says how many of them make a unit, so amounts go through
+[`formatAmount()`](#formatamount) — which takes that currency — and this stays a number formatter.
 
 ```php
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
-MoneyFormatter::numberFormat(123456, 'en_US');                      // 1,234.56
-MoneyFormatter::numberFormat('123456', 'en_US');                    // 1,234.56
-MoneyFormatter::numberFormat($money->getAmount(), 'en_US');         // 1,234.56
-MoneyFormatter::numberFormat(123456, 'de_DE');                      // 1.234,56
-MoneyFormatter::numberFormat(123456, 'sv_SE');                      // 1 234,56
+MoneyFormatter::formatNumber(1234.56, 'en_US');        // 1,234.56
+MoneyFormatter::formatNumber('1234.56', 'en_US');      // 1,234.56
+MoneyFormatter::formatNumber(1234, 'en_US');           // 1,234.00
+MoneyFormatter::formatNumber('1234', 'en_US');         // 1,234.00
+MoneyFormatter::formatNumber(1234.56, 'de_DE');        // 1.234,56
+MoneyFormatter::formatNumber(1234.56, 'sv_SE');        // 1 234,56
+MoneyFormatter::formatNumber('not a number', 'en_US'); // ''
 
-MoneyFormatter::numberFormat(1234.56, 'en_US', minorUnits: false);  // 1,234.56
-MoneyFormatter::numberFormat(123456, 'en_US', minorUnits: false);   // 123,456.00
-MoneyFormatter::numberFormat('not a number', 'en_US');              // ''
+MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: 0);  // 1,235
+MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: -2); // 1,200
+```
 
-MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: 0, minorUnits: false);  // 1,235
-MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: -2, minorUnits: false); // 1,200
+For an amount without a currency symbol — which is what a minor-unit value usually wants — use
+`formatAmount(..., showCurrencySymbol: false)`, which scales by the minor unit of the currency:
 
-MoneyFormatter::numberFormat(123456, 'en_US', minorDecimals: 0);              // 123,456.00
-MoneyFormatter::numberFormat(123456, 'en_US', minorDecimals: 2);              // 1,234.56
-MoneyFormatter::numberFormat(123456, 'en_US', decimals: 4, minorDecimals: 4); // 12.3456
+```php
+MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false);
+// 1,234.56
 
-// The eight minor units of a crypto currency, which format() cannot render since ICU has no data for it
-MoneyFormatter::numberFormat(100000000, 'en_US', decimals: 8, minorDecimals: 8); // 1.00000000
+MoneyFormatter::formatAmount(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
+// 1.00000000 — eight minor units, which ICU has no data for
 ```
 
 ### `formatShort`
@@ -461,7 +457,7 @@ public static function formatShort(
 
 Amounts below 1000 of the currency's own major unit are formatted in full — 100000 minor units for USD,
 1000 for JPY — where the currency decides the decimals. The abbreviation itself uses the minor unit of
-the currency too, so `formatShort()` and `format()` always agree about the magnitude of an amount, while
+the currency too, so `formatShort()` and `formatAmount()` always agree about the magnitude of an amount, while
 the abbreviated mantissa keeps two decimals whatever the currency: ¥1.23M says three digits that ¥1M
 would lose.
 
@@ -797,18 +793,25 @@ MONEY_LOAD_CRYPTO_CURRENCIES=true
 Support for them is partial, since crypto currencies are not part of ISO 4217 and `intl` has no data for
 them. `Currency::fromCode('BTC')` works and gives you the right minor unit (8), and `getFormattingRules()`
 returns the currency code as the symbol and its eight fraction digits, but formatting an amount *with* a
-currency symbol through `format()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`.
+currency symbol through `formatAmount()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`.
 
-Use `numberFormat()` with the currency's minor unit and add the symbol yourself:
+Everything else works, because the symbol is the only part ICU needs its own data for. Leave it out and
+add your own:
 
 ```php
 // 100000000 minor units = 1 BTC
-MoneyFormatter::numberFormat(100000000, 'en_US', decimals: 8, minorDecimals: 8).' BTC'; // 1.00000000 BTC
+MoneyFormatter::formatAmount(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false).' BTC';
+// 1.00000000 BTC
 ```
 
-Note that `format(..., showCurrencySymbol: false)` is not a substitute here: it places the decimal point by
-ISO 4217 data, which has nothing to say about a crypto currency, so it throws `UnknownCurrencyException`
-just as `format()` does. For ISO currencies it uses the minor unit of the currency correctly.
+`parseDecimal()` reads it back the same way, scaling by the minor unit of the currency you pass:
+
+```php
+MoneyFormatter::parseDecimal('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
+```
+
+Pass a bare `Money\Currency` rather than a LaraPara `Currency` and there is no minor unit to read, so
+both directions fall back to two decimals.
 
 The crypto list carries no names of its own, so `Currency::name` is the code for those — `BTC - BTC` in a
 select array.
