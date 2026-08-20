@@ -26,8 +26,7 @@ class LowerCasedCurrenciesProvider implements CurrenciesProvider
 }
 
 beforeEach(function (): void {
-    // Clear cache between tests
-    Cache::flush();
+    CurrencyRepository::clearCache();
     Cache::shouldReceive('remember')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
     Cache::shouldReceive('flexible')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
     Cache::shouldReceive('rememberForever')->andReturnUsing(fn ($key, $callback) => $callback());

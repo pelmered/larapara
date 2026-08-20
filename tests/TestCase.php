@@ -37,8 +37,6 @@ class TestCase extends \Orchestra\Testbench\TestCase
                 'database' => ':memory:',
                 'prefix'   => '',
             ]);
-            $config->set('cache.default', 'file');
-
             $config->set('larapara.currency_cache.type', false);
             $config->set('larapara.available_currencies', ['USD', 'EUR', 'SEK']);
 

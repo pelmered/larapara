@@ -3,6 +3,7 @@
 use Illuminate\Database\Eloquent\Model;
 use Money\Currency;
 use Money\Money;
+use Pelmered\LaraPara\Casts\CurrencyCast;
 use Pelmered\LaraPara\Casts\MoneyCast;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\Tests\Support\Models\Post;
@@ -14,11 +15,27 @@ class TestModel extends Model
     public $timestamps = false;
 
     protected $casts = [
-        'price'        => MoneyCast::class,
-        'price_custom' => MoneyCast::class,
+        'price'                 => MoneyCast::class,
+        'price_currency'        => CurrencyCast::class,
+        'price_custom'          => MoneyCast::class,
+        'price_custom_currency' => CurrencyCast::class,
+        'amount_currency'       => CurrencyCast::class,
     ];
 
     protected $fillable = ['amount', 'currency'];
+}
+
+// Casting only the amount is a supported configuration too — nothing in MoneyCast requires
+// CurrencyCast — and it is the only one that can hold a currency code the registry would refuse.
+class AmountOnlyModel extends Model
+{
+    protected $guarded = [];
+
+    public $timestamps = false;
+
+    protected $casts = [
+        'price' => MoneyCast::class,
+    ];
 }
 
 it('casts to Money object', function (): void {
@@ -114,11 +131,11 @@ it('casts to Money with currency from another field', function (): void {
 // An empty currency column has no currency to read, and a Money\Currency built from an empty code
 // only fails later, somewhere that cannot say which column it came from.
 it('refuses to read an amount whose currency column is empty', function (): void {
-    $model                        = new TestModel;
-    $model->price_custom          = 12345;
-    $model->price_custom_currency = '';
+    $model                 = new AmountOnlyModel;
+    $model->price          = 12345;
+    $model->price_currency = '';
 
-    expect(fn (): ?Money => $model->price_custom)->toThrow(UnsupportedCurrency::class);
+    expect(fn (): ?Money => $model->price)->toThrow(UnsupportedCurrency::class);
 });
 
 it('sets value from Money object', function (): void {

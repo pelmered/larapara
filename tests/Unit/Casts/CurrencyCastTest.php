@@ -33,12 +33,35 @@ it('casts to money currency when configured', function (): void {
 });
 
 it('handles null values', function (): void {
-    $model = Post::factory()->make([
+    $model                 = new Post;
+    $model->price_currency = null;
+
+    expect($model->getAttributes()['price_currency'])->toBeNull()
+        ->and($model->price_currency)->toBeNull();
+});
+
+// MoneyCast::set() writes the currency column alongside the amount, so which of the two is assigned
+// last decides what the column holds. Pinned here rather than left to the order a factory defines.
+it('writes the default currency with a null amount assigned after a null currency', function (): void {
+    $model                 = new Post;
+    $model->price_currency = null;
+    $model->price          = null;
+
+    expect($model->getAttributes())->toMatchArray([
+        'price'          => null,
+        'price_currency' => 'USD',
+    ]);
+});
+
+it('keeps a null currency when the amount is assigned first', function (): void {
+    $model                 = new Post;
+    $model->price          = null;
+    $model->price_currency = null;
+
+    expect($model->getAttributes())->toMatchArray([
         'price'          => null,
         'price_currency' => null,
     ]);
-
-    expect($model->price_currency)->toBeNull();
 });
 
 it('sets currency from currency instance', function (): void {
@@ -79,3 +102,19 @@ it('refuses a currency that is not available', function (mixed $value): void {
     'string'                  => ['GBP'],
     'not a currency at all'   => ['nonsense'],
 ]);
+
+// The set tests above assert the raw column, so nothing reached get() with a code this configuration
+// does not know — the state a row written before the code was removed from available_currencies is in.
+it('refuses a currency the configuration does not know when hydrating', function (): void {
+    $model = (new Post)->newFromBuilder(['price_currency' => 'GBP']);
+
+    expect(fn (): mixed => $model->price_currency)->toThrow(UnsupportedCurrency::class);
+});
+
+it('casts a currency it knows when hydrating', function (): void {
+    $model = (new Post)->newFromBuilder(['price_currency' => 'SEK']);
+
+    expect($model->price_currency)
+        ->toBeInstanceOf(Currency::class)
+        ->getCode()->toBe('SEK');
+});

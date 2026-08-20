@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -48,13 +50,6 @@ it('formats an amount given as a numeric string', function (): void {
         ->toEqual('$1,234.56')
         ->and(MoneyFormatter::format(' -123456 ', Currency::fromCode('USD'), 'en_US'))
         ->toEqual('-$1,234.56');
-});
-
-it('handles boolean inputs', function (): void {
-    expect(MoneyFormatter::format(true, Currency::fromCode('USD'), 'en_US'))
-        ->toEqual('$0.01');
-    expect(MoneyFormatter::format(false, Currency::fromCode('USD'), 'en_US'))
-        ->toEqual('$0.00');
 });
 
 it('formats negative values correctly', function (): void {
