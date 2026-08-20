@@ -57,27 +57,39 @@ it('formats negative values correctly', function (): void {
         ->toEqual('-$15,000.00');
 });
 
-it('formats different currencies with appropriate precision', function (): void {
-    // Japanese Yen typically doesn't use decimal places
-    $result = MoneyFormatter::format(12345, Currency::fromCode('JPY'), 'en_US', decimals: 0);
+// The call every application makes names no decimals, so this is the one that says what a currency
+// with a minor unit other than two renders as.
+it('formats a currency with the fraction digits of that currency', function (string $currency, int $value, string $expectedOutput): void {
+    expect(replaceNonBreakingSpaces(MoneyFormatter::format($value, Currency::fromCode($currency), 'en_US')))
+        ->toBe($expectedOutput);
+})->with([
+    'two minor units'   => ['USD', 12345, '$123.45'],
+    'no minor units'    => ['JPY', 12345, '¥12,345'],
+    'three minor units' => ['BHD', 12345, 'BHD 12.345'],
+]);
 
-    // The test expects ¥123 but might get ¥12,345 depending on implementation
-    // Rather than hardcoding a value, we'll check that it's a valid JPY format
-    expect($result)->toContain('¥');
+it('lets the decimals argument override the fraction digits of the currency', function (string $currency, int $value, int $decimals, string $expectedOutput): void {
+    expect(replaceNonBreakingSpaces(MoneyFormatter::format($value, Currency::fromCode($currency), 'en_US', decimals: $decimals)))
+        ->toBe($expectedOutput);
+})->with([
+    'yen with decimals' => ['JPY', 12345, 2, '¥12,345.00'],
+    'dinar without'     => ['BHD', 12345, 0, 'BHD 12'],
+    'dollars with four' => ['USD', 12345, 4, '$123.4500'],
+]);
 
-    // Bahraini Dinar uses 3 decimal places
-    $result = MoneyFormatter::format(12345, Currency::fromCode('BHD'), 'en_US', decimals: 3);
+// Formatting and parsing back is the round trip an application makes around a form field, and it
+// only holds while both directions take the scale from the same place.
+it('parses back what it formats', function (string $currency, int $value): void {
+    $formatted = MoneyFormatter::format($value, Currency::fromCode($currency), 'en_US', showCurrencySymbol: false);
 
-    // Check valid BHD format with 3 decimal places
-    // The result could be BHD 12.345 or similar, but might not exactly contain BD
-    expect($result)->toContain('BHD');
-    expect($result)->toContain('.');
-});
-
-it('lets the decimals argument override the fraction digits of the currency', function (): void {
-    expect(MoneyFormatter::format(12345, Currency::fromCode('USD'), 'en_US', decimals: 4))
-        ->toEqual('$123.4500');
-});
+    expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), 'en_US'))
+        ->toBe((string) $value);
+})->with([
+    'two minor units'   => ['USD', 123456],
+    'no minor units'    => ['JPY', 123456],
+    'three minor units' => ['BHD', 123456],
+    'krona'             => ['SEK', 123456],
+]);
 
 it('handles different locales properly', function (): void {
     // Testing French locale

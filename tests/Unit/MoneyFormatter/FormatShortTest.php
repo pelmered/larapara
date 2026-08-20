@@ -41,7 +41,7 @@ it('formats amounts below a thousand in full', function (string $currency, int $
 })->with([
     'just below the threshold' => ['USD', 99999, '$999.99'],
     'at the threshold'         => ['USD', 100000, '$1.00K'],
-    'no minor units'           => ['JPY', 999, '¥999.00'],
+    'no minor units'           => ['JPY', 999, '¥999'],
     'zero'                     => ['USD', 0, '$0.00'],
 ]);
 

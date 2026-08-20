@@ -4,6 +4,7 @@ namespace Pelmered\LaraPara\Tests;
 
 use Locale;
 use Money\Currency as MoneyCurrency;
+use Money\Money;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -311,6 +312,23 @@ it('formats to the international currency symbol in the other currency styles', 
     'standard currency' => [16],
 ]);
 
+// The formatters are kept between calls, so everything they are built from has to be part of what
+// they are kept under — the config among it, which decides the symbol the pattern carries.
+it('formats the same call differently when the symbol setting changes', function (): void {
+    config(['larapara.intl_currency_symbol' => false]);
+
+    expect(MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US')))
+        ->toBe('USD 1,234.56');
+
+    config(['larapara.intl_currency_symbol' => false]);
+
+    expect(MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
+});
+
 it('gets the formatting rules of the given currency', function (): void {
     expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
 
@@ -373,11 +391,40 @@ it('formats without a currency symbol by the minor unit of the currency', functi
 
 // Negative decimals are significant digits, which ICU applies on its own. Scaling the value through
 // an intermediate int cast first zeroed anything below the scale factor.
-it('formats to a number of significant digits', function (mixed $value, int $decimals, string $expectedOutput): void {
-    expect(MoneyFormatter::numberFormat($value, 'en_US', decimals: $decimals))
+it('formats to a number of significant digits', function (mixed $value, int $decimals, bool $minorUnits, string $expectedOutput): void {
+    expect(MoneyFormatter::numberFormat($value, 'en_US', decimals: $decimals, minorUnits: $minorUnits))
         ->toBe($expectedOutput);
 })->with([
-    'documented example'    => [1234.56, -2, '1,200'],
-    'value below the scale' => [12.34, -3, '12.3'],
-    'minor units input'     => [123456, -3, '1,230'],
+    'documented example'    => [1234.56, -2, false, '1,200'],
+    'value below the scale' => [12.34, -3, false, '12.3'],
+    'minor units input'     => [123456, -3, true, '1,230'],
 ]);
+
+// The value is read as minor units or as a plain number because the call says so, not because of the
+// PHP type it happens to arrive in — a numeric string and an int are the same amount.
+it('reads its value as the call says, whatever the type', function (mixed $value): void {
+    expect(MoneyFormatter::numberFormat($value, 'en_US', minorUnits: true))->toBe('1,234.56')
+        ->and(MoneyFormatter::numberFormat($value, 'en_US', minorUnits: false))->toBe('123,456.00');
+})->with([
+    'int'            => [123456],
+    'numeric string' => ['123456'],
+    'float'          => [123456.0],
+]);
+
+it('takes the unit of its value from the config when the call does not say', function (): void {
+    config(['larapara.number_format.minor_units' => false]);
+
+    expect(MoneyFormatter::numberFormat(123456, 'en_US'))->toBe('123,456.00');
+
+    config(['larapara.number_format.minor_units' => true]);
+
+    expect(MoneyFormatter::numberFormat(123456, 'en_US'))->toBe('1,234.56');
+});
+
+// Money::getAmount() returns a numeric string, which used to be read as a major amount and formatted
+// a hundred times too large.
+it('formats the amount of a Money object', function (): void {
+    $money = new Money(123456, new MoneyCurrency('USD'));
+
+    expect(MoneyFormatter::numberFormat($money->getAmount(), 'en_US'))->toBe('1,234.56');
+});
