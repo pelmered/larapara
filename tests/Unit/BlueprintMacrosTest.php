@@ -34,21 +34,21 @@ function compileMacro(string $macro, string $grammarClass): string
         ? new $grammarClass($connection)
         : new $grammarClass;
 
-    if ((new ReflectionMethod(Blueprint::class, 'toSql'))->getNumberOfParameters() > 0) {
-        $blueprint = newBlueprint('test_table');
-        $blueprint->create();
-        $blueprint->{$macro}('price');
+    // Laravel 11 hands the connection and the grammar to toSql(); 12 reads both off the blueprint's
+    // connection. Invoked through the reflection that reads the arity, since a call written for one
+    // version has the wrong number of arguments for the other.
+    $toSql     = new ReflectionMethod(Blueprint::class, 'toSql');
+    $arguments = $toSql->getNumberOfParameters() > 0 ? [$connection, $grammar] : [];
 
-        return implode(' | ', $blueprint->toSql($connection, $grammar));
+    if ($arguments === []) {
+        $connection->setSchemaGrammar($grammar);
     }
-
-    $connection->setSchemaGrammar($grammar);
 
     $blueprint = newBlueprint('test_table', $connection);
     $blueprint->create();
     $blueprint->{$macro}('price');
 
-    return implode(' | ', $blueprint->toSql());
+    return implode(' | ', $toSql->invokeArgs($blueprint, $arguments));
 }
 
 /**
