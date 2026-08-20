@@ -25,7 +25,7 @@ class MoneyCast implements CastsAttributes
     /**
      * Cast the given value.
      */
-    #[Param(value: '?int')]
+    #[Param(value: 'int|float|string|null')]
     #[Param(attributes: 'array<string, mixed>')]
     public function get(Model $model, string $key, mixed $value, array $attributes): ?Money
     {
@@ -36,9 +36,7 @@ class MoneyCast implements CastsAttributes
         $currency = $this->getCurrencyFromModel($model, $key);
 
         $amount = config('larapara.store.format') === 'decimal'
-            // Rounded, because scaling the stored decimal back is not exact in binary floating
-            // point: 19.99 * 100 is 1998.9999999999998, which truncates to a cent too little.
-            ? (int) round((float) $value * 10 ** $this->getDecimals($currency->getCode()))
+            ? $this->fromDecimal((string) $value, $currency->getCode())
             : (int) $value;
 
         return new Money($amount, $currency);
@@ -147,6 +145,40 @@ class MoneyCast implements CastsAttributes
         return $minorUnit === 0
             ? $sign.$digits
             : $sign.substr($digits, 0, -$minorUnit).'.'.substr($digits, -$minorUnit);
+    }
+
+    /**
+     * The minor units a decimal column holds: "1234.56" in USD is 123456.
+     *
+     * The inverse of toDecimal(), and exact the same way: the point is moved rather than the value
+     * multiplied, so an amount larger than a double holds exactly reads back as it was written. The
+     * column keeps `store.decimal_scale` decimals, which is at least the minor unit of most
+     * currencies, so the zeros it pads a shorter amount with are dropped again here.
+     */
+    #[Returns('numeric-string')]
+    protected function fromDecimal(string $value, string $currency): string
+    {
+        $minorUnit = $this->getDecimals($currency);
+
+        [$whole, $fraction] = array_pad(explode('.', trim($value), 2), 2, '');
+
+        $sign     = str_starts_with($whole, '-') ? '-' : '';
+        $whole    = ltrim($whole, '+-');
+        $fraction = rtrim($fraction, '0');
+
+        if (strlen($fraction) <= $minorUnit) {
+            $digits = ltrim($whole.str_pad($fraction, $minorUnit, '0'), '0');
+            $amount = $digits === '' ? '0' : $sign.$digits;
+
+            if (is_numeric($amount)) {
+                return $amount;
+            }
+        }
+
+        // Not a plain decimal carrying the decimals of its currency: a float in exponent notation
+        // from a driver that hands one back, or a row written by hand with more decimals than the
+        // currency has. Read as the number it is, which rounds rather than reads the amount short.
+        return (string) (int) round((float) $value * 10 ** $minorUnit);
     }
 
     public function getDecimals(string $currencyCode): int

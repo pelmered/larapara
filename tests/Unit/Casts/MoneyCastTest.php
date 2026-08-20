@@ -284,4 +284,55 @@ it('stores a large amount exactly', function (): void {
 
     expect($model->getAttributes()['price'])->toBe('922337203685477.58');
 });
-});
+
+// And reads it back the same way, by moving the point rather than by multiplying: a double carries
+// 2**53 exactly and nothing above it, so the read used to hand back a different amount than was
+// written for anything larger.
+it('round trips a decimal column exactly', function (string $currency, string $amount, string $expectedColumn): void {
+    config([
+        'larapara.store.format'           => 'decimal',
+        'larapara.store.decimal_scale'    => 8,
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', 'JPY', 'BHD', 'BTC'],
+    ]);
+
+    $cast                  = new MoneyCast;
+    $model                 = new TestModel;
+    $model->price_currency = $currency;
+
+    $stored = $cast->set($model, 'price', new Money($amount, new Currency($currency)), [])['price'];
+
+    expect($stored)->toBe($expectedColumn)
+        ->and($cast->get($model, 'price', $stored, [])->getAmount())->toBe($amount);
+})->with([
+    'past what a double holds' => ['USD', '10000000000000001', '100000000000000.01'],
+    'the largest int'          => ['USD', '92233720368547758', '922337203685477.58'],
+    'an ordinary amount'       => ['USD', '123456', '1234.56'],
+    'below one'                => ['USD', '5', '0.05'],
+    'negative'                 => ['USD', '-123456', '-1234.56'],
+    'zero'                     => ['USD', '0', '0.00'],
+    'no minor units'           => ['JPY', '1234', '1234'],
+    'three minor units'        => ['BHD', '1234567', '1234.567'],
+    'eight minor units'        => ['BTC', '2100000000000000', '21000000.00000000'],
+]);
+
+// A column keeps its own scale, so it hands back an amount padded past the minor unit of its
+// currency — and a row written by hand can carry more decimals than the currency has at all.
+it('reads a decimal column whatever scale it kept', function (string $currency, string $column, string $expectedAmount): void {
+    config([
+        'larapara.store.format'         => 'decimal',
+        'larapara.available_currencies' => ['USD', 'JPY'],
+    ]);
+
+    $model                 = new TestModel;
+    $model->price_currency = $currency;
+
+    expect((new MoneyCast)->get($model, 'price', $column, [])->getAmount())->toBe($expectedAmount);
+})->with([
+    'padded to the column scale'   => ['USD', '1234.560', '123456'],
+    'padded with nothing to spare' => ['USD', '1234.500', '123450'],
+    'no fractional part at all'    => ['USD', '1234', '123400'],
+    'zero padded'                  => ['USD', '0.000', '0'],
+    'no minor units, padded'       => ['JPY', '1234.000', '1234'],
+    'more decimals than the unit'  => ['USD', '1234.567', '123457'],
+]);

@@ -35,6 +35,10 @@ which is the default, was never affected.
   `1998` instead of `1999`. Nothing needs migrating — the column always held the right value — but any
   figure your application copied out of a read is a cent short.
 
+  The read moves the decimal point rather than multiplying, the way the write places it, so an amount a
+  double cannot hold exactly — above 2\*\*53 minor units, which needs a wider column than the macros
+  write — comes back as it went in rather than a unit or two off.
+
 - **Assigning `null` to a nullable money column now stores `NULL`.** It used to store `0.000`, so "no price
   set" and "free" were indistinguishable. If you have rows that were meant to be null, they are zeros in
   the column now and only you can tell which is which.
