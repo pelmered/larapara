@@ -61,6 +61,11 @@ class MoneyFormatter
      * belongs, so the second reading has to know them all too. Otherwise which member CLDR happens to
      * name decides whose input is forgiven, and that differs between ICU releases.
      */
+    private const GROUPING_SEPARATOR_CLASSES = [
+        ["\u{0020}", "\u{00a0}", "\u{2009}", "\u{202f}"],
+        ["\u{0027}", "\u{2019}", "\u{02bc}"],
+    ];
+
     /**
      * Formatters built so far, by everything they were built from.
      *
@@ -74,11 +79,6 @@ class MoneyFormatter
      * @var array<string, NumberFormatter>
      */
     private static array $currencyFormatters = [];
-
-    private const GROUPING_SEPARATOR_CLASSES = [
-        ["\u{0020}", "\u{00a0}", "\u{2009}", "\u{202f}"],
-        ["\u{0027}", "\u{2019}", "\u{02bc}"],
-    ];
 
     /**
      * Formats a Money object, which carries both the amount and the currency it is counted in.
