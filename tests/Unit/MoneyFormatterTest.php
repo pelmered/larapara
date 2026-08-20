@@ -347,6 +347,26 @@ it('gets the formatting rules of the default locale for an empty locale', functi
         ->toEqual(MoneyFormatter::getFormattingRules(Locale::getDefault(), $currency));
 });
 
+// Formatters are kept under the locale they were built for, so an empty locale has to be resolved
+// before it becomes that key: otherwise the first call freezes whatever the default was then, which
+// a long-running process is free to change between calls.
+it('follows the default locale when it changes, for an empty locale', function (): void {
+    $currency = Currency::fromCode('USD');
+    $default  = Locale::getDefault();
+
+    try {
+        Locale::setDefault('en_US');
+        expect(MoneyFormatter::formatFromMinor(123456, $currency, ''))
+            ->toBe(MoneyFormatter::formatFromMinor(123456, $currency, 'en_US'));
+
+        Locale::setDefault('sv_SE');
+        expect(MoneyFormatter::formatFromMinor(123456, $currency, ''))
+            ->toBe(MoneyFormatter::formatFromMinor(123456, $currency, 'sv_SE'));
+    } finally {
+        Locale::setDefault($default);
+    }
+});
+
 // ICU locale keywords only accept 3 character currency codes, so longer ones fall back to the
 // currency of the locale's region unless we short circuit them.
 it('gets the formatting rules of a currency ICU does not know', function (): void {

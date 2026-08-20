@@ -425,8 +425,10 @@ class MoneyFormatter
      */
     private static function currencyFormatter(string $locale, string $currencyCode): NumberFormatter
     {
+        $locale = self::resolveLocale($locale);
+
         return self::$currencyFormatters[$locale.'|'.$currencyCode] ??= new NumberFormatter(
-            self::currencyKeywordLocale($locale, $currencyCode),
+            $locale.'@currency='.$currencyCode,
             NumberFormatter::CURRENCY,
         );
     }
@@ -714,6 +716,7 @@ class MoneyFormatter
         ?int $significantDigits = null,
         string $numberSuffix = '',
     ): NumberFormatter {
+        $locale             = self::resolveLocale($locale);
         $intlCurrencySymbol = (bool) config('larapara.intl_currency_symbol');
 
         // Building one costs more than everything else a format call does put together, and the same
@@ -786,14 +789,17 @@ class MoneyFormatter
     }
 
     /**
-     * The locale ICU needs to report the rules of a currency the locale itself does not use.
+     * The locale a formatter is built for, with the empty one resolved to intl's default.
      *
-     * An empty locale stands for the default one to every other intl call, but appending a keyword to
-     * it makes an identifier ICU refuses outright, so it is resolved before the keyword goes on.
+     * An empty locale stands for the default one to every other intl call, and two things here need
+     * it spelled out: appending a `@currency=` keyword to an empty locale makes an identifier ICU
+     * refuses outright, and a formatter is kept under the locale it was built for — so leaving the
+     * resolution to intl would key one under the empty string and outlive the default it was built
+     * from, which a long-running process can change between calls.
      */
-    private static function currencyKeywordLocale(string $locale, string $currencyCode): string
+    private static function resolveLocale(string $locale): string
     {
-        return ($locale === '' ? Locale::getDefault() : $locale).'@currency='.$currencyCode;
+        return $locale === '' ? Locale::getDefault() : $locale;
     }
 
     /**
