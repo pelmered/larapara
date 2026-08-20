@@ -39,7 +39,7 @@ function localizedNumber(string $template, string $locale, string $currency): st
 */
 
 it('parses a number written the way its locale writes it', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'comma grouping, dot decimal' => ['en_US', 'USD', '1_234~56', '123456'],
@@ -64,7 +64,7 @@ it('parses back what it formatted', function (string $locale, string $currency, 
             showCurrencySymbol: false
         );
 
-        expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), $locale))
+        expect(MoneyFormatter::parseToMinor($formatted, Currency::fromCode($currency), $locale))
             ->toBe((string) $amount);
     }
 })->with([
@@ -91,7 +91,7 @@ it('parses back what it formatted', function (string $locale, string $currency, 
 */
 
 it('reads a dot as the decimal separator of the locale', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     // Locales that group with dots: the dot would otherwise be dropped as grouping.
@@ -123,7 +123,7 @@ it('reads a dot as the decimal separator of the locale', function (string $local
 ]);
 
 it('leaves a dot that is in a grouping position as grouping', function (string $locale, string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'de_DE, thousands'         => ['de_DE', 'EUR', '1.234', '123400'],
@@ -133,7 +133,7 @@ it('leaves a dot that is in a grouping position as grouping', function (string $
 ]);
 
 it('needs no second reading where the dot already is the decimal separator', function (string $locale, string $currency, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal('1.5', Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor('1.5', Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'en_US'                 => ['en_US', 'USD', '150'],
@@ -153,7 +153,7 @@ it('needs no second reading where the dot already is the decimal separator', fun
 */
 
 it('drops a grouping separator that is out of position', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'in the decimals'         => ['en_US', 'USD', '2_00', '20000'],
@@ -166,7 +166,7 @@ it('drops a grouping separator that is out of position', function (string $local
 ]);
 
 it('keeps a grouping separator that is in position', function (string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'thousands'         => ['1,234', '123400'],
@@ -177,7 +177,7 @@ it('keeps a grouping separator that is in position', function (string $input, st
 // Grouping never follows the decimal separator, so such a string is malformed rather than merely out
 // of position — dropping the separator would move the decimal point and invent an amount.
 it('refuses a grouping separator that follows the decimal separator', function (string $locale, string $currency, string $template): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(fn (): string => MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toThrow(ParserException::class);
 })->with([
     'en_US, dot grouping input' => ['en_US', 'USD', '1~234_56'],
@@ -187,7 +187,7 @@ it('refuses a grouping separator that follows the decimal separator', function (
 
 // The two rules together cannot rescue a string that reads as another locale's number.
 it('refuses a number written for a different locale', function (string $locale, string $currency, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale))
         ->toThrow(ParserException::class);
 })->with([
     'us number in a swedish locale' => ['sv_SE', 'SEK', '1,234.56'],
@@ -201,11 +201,10 @@ it('refuses a number written for a different locale', function (string $locale, 
 */
 
 it('refuses a string that is not a number in its entirety', function (string $locale, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), $locale))
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), $locale))
         ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
 })->with([
     'trailing currency code'   => ['en_US', '12 USD'],
-    'leading currency code'    => ['en_US', 'USD 12'],
     'trailing letters'         => ['en_US', '12abc'],
     'leading letters'          => ['en_US', 'abc12'],
     'two decimal separators'   => ['en_US', '1.2.3'],
@@ -223,14 +222,14 @@ it('refuses a string that is not a number in its entirety', function (string $lo
 
 it('keeps the original exception as the cause where there is one', function (): void {
     try {
-        MoneyFormatter::parseDecimal('nonsense', Currency::fromCode('USD'), 'en_US');
+        MoneyFormatter::parseToMinor('nonsense', Currency::fromCode('USD'), 'en_US');
     } catch (ParserException $parserException) {
         expect($parserException->getMessage())->toBe('The value must be a valid numeric value.');
 
         return;
     }
 
-    $this->fail('parseDecimal did not throw');
+    $this->fail('parseToMinor did not throw');
 });
 
 /*
@@ -240,18 +239,18 @@ it('keeps the original exception as the cause where there is one', function (): 
 */
 
 it('parses an empty value as an empty string', function (?string $input): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))->toBe('');
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))->toBe('');
 })->with([
     'null'         => [null],
     'empty string' => [''],
 ]);
 
 it('parses zero', function (string $input): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))->toBe('0');
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))->toBe('0');
 })->with(['0', '0.00', '0.001', '-0']);
 
 it('parses a negative amount', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'hyphen minus'          => ['en_US', 'USD', '-1.5', '-150'],
@@ -264,7 +263,7 @@ it('parses a negative amount', function (string $locale, string $currency, strin
 ]);
 
 it('parses to the minor unit of the currency', function (string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'two minor units'         => ['USD', '12.34', '1234'],
@@ -276,7 +275,7 @@ it('parses to the minor unit of the currency', function (string $currency, strin
 ]);
 
 it('rounds half up past the minor unit of the currency', function (string $currency, string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'half a minor unit up'   => ['USD', '1.005', '101'],
@@ -291,7 +290,7 @@ it('rounds half up past the minor unit of the currency', function (string $curre
 // PHP's `precision` ini setting deforms a float above 14 significant digits on its way to a string,
 // which silently changed the amount.
 it('parses an amount above the float printing precision', function (string $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'sixteen digits' => ['1234567890123456', '123456789012345600'],
@@ -300,11 +299,11 @@ it('parses an amount above the float printing precision', function (string $inpu
 ]);
 
 it('accepts the amount either side of surrounding whitespace', function (string $input): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))->toBe('1234');
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))->toBe('1234');
 })->with(['12.34', ' 12.34', '12.34 ', "\t12.34\n", '  12.34  ']);
 
 it('parses the digits of the locale', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale))
         ->toBe($expectedOutput);
 })->with([
     'eastern arabic-indic'      => ['ar_EG', 'EGP', '١~٥', '150'],
@@ -313,8 +312,8 @@ it('parses the digits of the locale', function (string $locale, string $currency
 ]);
 
 it('parses a Money currency as well as a LaraPara one', function (): void {
-    expect(MoneyFormatter::parseDecimal('1.5', new MoneyCurrency('USD'), 'en_US'))->toBe('150')
-        ->and(MoneyFormatter::parseDecimal('1.5', Currency::fromCode('USD'), 'en_US'))->toBe('150');
+    expect(MoneyFormatter::parseToMinor('1.5', new MoneyCurrency('USD'), 'en_US'))->toBe('150')
+        ->and(MoneyFormatter::parseToMinor('1.5', Currency::fromCode('USD'), 'en_US'))->toBe('150');
 });
 
 /*
@@ -328,7 +327,7 @@ it('parses a Money currency as well as a LaraPara one', function (): void {
 */
 
 it('refuses what the separator rules would have rescued when it is strict', function (string $locale, string $currency, string $template): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
+    expect(fn (): string => MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
         ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
 })->with([
     'dropped grouping separator'  => ['en_US', 'USD', '2_00'],
@@ -339,7 +338,7 @@ it('refuses what the separator rules would have rescued when it is strict', func
 ]);
 
 it('accepts what the locale itself writes when it is strict', function (string $locale, string $currency, string $template, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
+    expect(MoneyFormatter::parseToMinor(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
         ->toBe($expectedOutput);
 })->with([
     'us number'              => ['en_US', 'USD', '1_234~56', '123456'],
@@ -354,26 +353,26 @@ it('accepts what the locale itself writes when it is strict', function (string $
 it('takes strictness from the config when it is not given', function (): void {
     config(['larapara.parse.strict' => true]);
 
-    expect(fn (): string => MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))
+    expect(fn (): string => MoneyFormatter::parseToMinor('2,00', Currency::fromCode('USD'), 'en_US'))
         ->toThrow(ParserException::class);
 
-    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US', strict: false))->toBe('20000');
+    expect(MoneyFormatter::parseToMinor('2,00', Currency::fromCode('USD'), 'en_US', strict: false))->toBe('20000');
 });
 
 it('is lenient when the config does not mention strictness at all', function (): void {
     config(['larapara.parse' => null]);
 
-    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))->toBe('20000');
+    expect(MoneyFormatter::parseToMinor('2,00', Currency::fromCode('USD'), 'en_US'))->toBe('20000');
 });
 
 it('refuses an amount that is not a number in either mode', function (bool $strict): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal('nonsense', Currency::fromCode('USD'), 'en_US', strict: $strict))
+    expect(fn (): string => MoneyFormatter::parseToMinor('nonsense', Currency::fromCode('USD'), 'en_US', strict: $strict))
         ->toThrow(ParserException::class);
 })->with([true, false]);
 
 it('parses an empty value the same way in either mode', function (bool $strict): void {
-    expect(MoneyFormatter::parseDecimal('', Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('')
-        ->and(MoneyFormatter::parseDecimal(null, Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('');
+    expect(MoneyFormatter::parseToMinor('', Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('')
+        ->and(MoneyFormatter::parseToMinor(null, Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('');
 })->with([true, false]);
 
 /*
@@ -393,7 +392,7 @@ it('parses an empty value the same way in either mode', function (bool $strict):
 it('reads any member of the separator class as grouping, in position', function (string $locale, string $currency, string $separator): void {
     $decimalSeparator = MoneyFormatter::getFormattingRules($locale, Currency::fromCode($currency))->decimalSeparator;
 
-    expect(MoneyFormatter::parseDecimal('1'.$separator.'234'.$decimalSeparator.'56', Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor('1'.$separator.'234'.$decimalSeparator.'56', Currency::fromCode($currency), $locale))
         ->toBe('123456');
 })->with([
     'de_CH, apostrophe'      => ['de_CH', 'CHF', "\u{0027}"],
@@ -408,7 +407,7 @@ it('reads any member of the separator class as grouping, in position', function 
 ]);
 
 it('reads any member of the separator class as grouping, out of position', function (string $locale, string $currency, string $separator): void {
-    expect(MoneyFormatter::parseDecimal('2'.$separator.'00', Currency::fromCode($currency), $locale))
+    expect(MoneyFormatter::parseToMinor('2'.$separator.'00', Currency::fromCode($currency), $locale))
         ->toBe('20000');
 })->with([
     'de_CH, apostrophe'      => ['de_CH', 'CHF', "\u{0027}"],
@@ -425,7 +424,7 @@ it('reads any member of the separator class as grouping, out of position', funct
 // The class is the class of the locale's own separator, not a free-for-all: a space is not a grouping
 // separator in a locale that groups with a comma.
 it('reads only the class of the locale it is given', function (string $locale, string $currency, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale))
         ->toThrow(ParserException::class);
 })->with([
     'space in a comma locale'      => ['en_US', 'USD', "2\u{00a0}00"],
@@ -435,7 +434,7 @@ it('reads only the class of the locale it is given', function (string $locale, s
 ]);
 
 it('still refuses a separator class member that follows the decimal separator', function (string $locale, string $currency, string $input): void {
-    expect(fn (): string => MoneyFormatter::parseDecimal($input, Currency::fromCode($currency), $locale))
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale))
         ->toThrow(ParserException::class);
 })->with([
     'de_CH, apostrophe'  => ['de_CH', 'CHF', "12.34\u{0027}56"],
@@ -446,5 +445,59 @@ it('still refuses a separator class member that follows the decimal separator', 
 // The second reading asks ICU for the separators of the locale, which used to be a ValueError rather
 // than a parse for the empty locale that every other intl call reads as the default one.
 it('gives a misplaced separator a second reading in the default locale too', function (): void {
-    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), ''))->toBe('20000');
+    expect(MoneyFormatter::parseToMinor('2,00', Currency::fromCode('USD'), ''))->toBe('20000');
 });
+
+/*
+|--------------------------------------------------------------------------
+| The currency written beside the amount
+|--------------------------------------------------------------------------
+*/
+
+// The formatter writes the symbol; a field that displays it posts it back, and a parser that refuses
+// its own output is a trap.
+it('reads back what the formatter writes, symbol and all', function (string $currency, string $locale, bool $intlSymbol): void {
+    config(['larapara.intl_currency_symbol' => $intlSymbol]);
+
+    $formatted = MoneyFormatter::formatFromMinor(123456, Currency::fromCode($currency), $locale);
+
+    expect(MoneyFormatter::parseToMinor($formatted, Currency::fromCode($currency), $locale))->toBe('123456')
+        ->and(MoneyFormatter::parseToMinor($formatted, Currency::fromCode($currency), $locale, strict: true))->toBe('123456');
+})->with([
+    'dollars, symbol'    => ['USD', 'en_US', false],
+    'dollars, code'      => ['USD', 'en_US', true],
+    'krona, symbol'      => ['SEK', 'sv_SE', false],
+    'krona, code'        => ['SEK', 'sv_SE', true],
+    'euro in german'     => ['EUR', 'de_DE', false],
+    'yen, no minor unit' => ['JPY', 'ja_JP', false],
+]);
+
+it('reads an amount written with its currency', function (string $locale, string $currency, string $input, string $expected): void {
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale))->toBe($expected);
+})->with([
+    'symbol'                                  => ['en_US', 'USD', '$1,234.56', '123456'],
+    'symbol, negative'                        => ['en_US', 'USD', '-$1,234.56', '-123456'],
+    'symbol, no grouping'                     => ['en_US', 'USD', '$1234.56', '123456'],
+    'code where the locale puts the currency' => ['en_US', 'USD', 'USD 12', '1200'],
+    'suffix symbol'                           => ['sv_SE', 'SEK', "1\u{a0}234,56\u{a0}kr", '123456'],
+    'suffix, typed spaces'                    => ['sv_SE', 'SEK', '1 234,56 kr', '123456'],
+]);
+
+// ICU reads any currency's symbol, so the one it reads has to be the one asked for.
+it('refuses an amount written with another currency', function (string $input): void {
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))
+        ->toThrow(ParserException::class);
+})->with([
+    'euro symbol' => ['€10'],
+    'euro code'   => ['EUR 10'],
+    'krona'       => ['10 kr'],
+]);
+
+// Strict mode is what the locale writes, in the notation this configuration writes it in.
+it('refuses the other notation and typed spaces in strict mode', function (string $locale, string $currency, string $input): void {
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode($currency), $locale, strict: true))
+        ->toThrow(ParserException::class);
+})->with([
+    'the code while the symbol is configured' => ['en_US', 'USD', 'USD 12'],
+    'spaces a keyboard produced'              => ['sv_SE', 'SEK', '1 234,56 kr'],
+]);

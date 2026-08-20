@@ -102,7 +102,7 @@ class MoneyFormatter
      * Formats an amount given in the minor units of a currency: 123456 in USD is $1,234.56.
      *
      * Which is what every amount in this package is — what MoneyCast stores, what Money::getAmount()
-     * returns and what parseDecimal() reads a string into. An amount that is not whole minor units
+     * returns and what parseToMinor() reads a string into. An amount that is not whole minor units
      * throws rather than being truncated into a plausible wrong one.
      */
     public static function formatFromMinor(
@@ -215,7 +215,13 @@ class MoneyFormatter
             ->formatCurrency($mantissa, $moneyCurrency->getCode());
     }
 
-    public static function parseDecimal(
+    /**
+     * Reads a localized amount string into the minor units of a currency: "1,234.56" in USD is 123456.
+     *
+     * A numeric string rather than an int, since that is what a Money holds and what the casts store,
+     * and it carries an amount past the range an int keeps losslessly.
+     */
+    public static function parseToMinor(
         ?string $moneyString,
         Currency|MoneyCurrency $currency,
         string $locale,
@@ -237,6 +243,14 @@ class MoneyFormatter
         $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $minorUnit);
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
+        if ($parsed === false) {
+            // The formatter writes the symbol of the currency, so the parser reads it back: an
+            // application that shows $1,234.56 in a field gets that string in the request, and a
+            // parser that refuses its own output is a trap. Strict mode accepts this, since this is
+            // what the locale writes — in the notation this configuration writes it in.
+            $parsed = self::parseCurrencyAmount($moneyString, $currency, $locale, $minorUnit, anyNotation: false);
+        }
+
         if ($parsed === false && ! $strict) {
             // Separators are the most common way for user input to miss its locale, so give them a
             // second reading before giving up. See: https://github.com/pelmered/larapara/issues/20
@@ -244,6 +258,10 @@ class MoneyFormatter
 
             if ($rewritten !== $moneyString) {
                 $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
+            }
+
+            if ($parsed === false) {
+                $parsed = self::parseCurrencyAmount($moneyString, $currency, $locale, $minorUnit, anyNotation: true);
             }
         }
 
@@ -287,10 +305,7 @@ class MoneyFormatter
     {
         $config          = config('larapara');
         $currencyCode    = $currency->getCode();
-        $numberFormatter = self::$currencyFormatters[$locale.'|'.$currencyCode] ??= new NumberFormatter(
-            self::currencyKeywordLocale($locale, $currencyCode),
-            NumberFormatter::CURRENCY,
-        );
+        $numberFormatter = self::currencyFormatter($locale, $currencyCode);
 
         $currencySymbol = $currencyCode;
 
@@ -310,6 +325,17 @@ class MoneyFormatter
             fractionDigits: self::getMinorUnit($currency),
             decimalSeparator: $numberFormatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL),
             groupingSeparator: $numberFormatter->getSymbol(NumberFormatter::GROUPING_SEPARATOR_SYMBOL),
+        );
+    }
+
+    /**
+     * The formatter the rules and symbols of a currency are read from, in a locale.
+     */
+    private static function currencyFormatter(string $locale, string $currencyCode): NumberFormatter
+    {
+        return self::$currencyFormatters[$locale.'|'.$currencyCode] ??= new NumberFormatter(
+            self::currencyKeywordLocale($locale, $currencyCode),
+            NumberFormatter::CURRENCY,
         );
     }
 
@@ -429,6 +455,51 @@ class MoneyFormatter
         }
 
         return [$groupingSeparator];
+    }
+
+    /**
+     * Parses an amount written with the symbol of the currency it is being read as.
+     *
+     * Strictly, that is the notation this configuration writes — the symbol or the ISO code,
+     * according to `intl_currency_symbol`, where the locale puts it. Leniently, either notation and
+     * either member of the space class a keyboard might have produced between the two.
+     *
+     * ICU reads any currency's symbol, so the code it read has to be the one asked for: €10 read as
+     * USD is a refusal rather than ten dollars.
+     */
+    #[Param(minorUnit: 'int<0, max>')]
+    private static function parseCurrencyAmount(
+        string $value,
+        MoneyCurrency $currency,
+        string $locale,
+        int $minorUnit,
+        bool $anyNotation,
+    ): float|false {
+        $formatters = [self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $minorUnit)];
+        $candidates = [$value];
+
+        if ($anyNotation) {
+            $formatters[] = self::currencyFormatter($locale, $currency->getCode());
+            $candidates[] = strtr($value, array_fill_keys(self::GROUPING_SEPARATOR_CLASSES[0], "\u{00a0}"));
+        }
+
+        foreach ($formatters as $formatter) {
+            foreach (array_unique($candidates) as $candidate) {
+                $code     = null;
+                $position = 0;
+                $parsed   = $formatter->parseCurrency($candidate, $code, $position);
+
+                if ($parsed === false || ! is_finite($parsed) || $position !== mb_strlen($candidate)) {
+                    continue;
+                }
+
+                if ($code === $currency->getCode()) {
+                    return $parsed;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

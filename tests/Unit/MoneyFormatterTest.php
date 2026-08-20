@@ -192,19 +192,19 @@ it('formats decimal money with Swedish locale', function (mixed $input, string $
 })->with(provideDecimalMoneyDataSek());
 
 it('parses decimal money in sek', function (mixed $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('SEK'), 'sv_SE'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('SEK'), 'sv_SE'))
         ->toBe($expectedOutput);
 })->with(provideDecimalDataSek());
 
 it('parses decimal money in usd', function (mixed $input, string $expectedOutput): void {
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
 
 it('parses decimal money in usd with intl symbol', function (mixed $input, string $expectedOutput): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    expect(MoneyFormatter::parseDecimal($input, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
 

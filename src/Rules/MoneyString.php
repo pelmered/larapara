@@ -13,7 +13,7 @@ use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 /**
- * Validates that a localized amount string is one MoneyFormatter::parseDecimal() can read.
+ * Validates that a localized amount string is one MoneyFormatter::parseToMinor() can read.
  *
  * The locale defaults to the application's, the currency to the configured default, and whether a
  * separator out of place is forgiven to `larapara.parse.strict`. Whether the currency itself is
@@ -45,7 +45,7 @@ class MoneyString implements ValidationRule
         }
 
         try {
-            MoneyFormatter::parseDecimal((string) $value, $currency, $locale, strict: $this->strict);
+            MoneyFormatter::parseToMinor((string) $value, $currency, $locale, strict: $this->strict);
         } catch (ParserException) {
             $this->fail($fail, $currency, $locale);
         }

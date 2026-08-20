@@ -83,7 +83,7 @@ it('lets the decimals argument override the fraction digits of the currency', fu
 it('parses back what it formats', function (string $currency, int $value): void {
     $formatted = MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US', showCurrencySymbol: false);
 
-    expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), 'en_US'))
+    expect(MoneyFormatter::parseToMinor($formatted, Currency::fromCode($currency), 'en_US'))
         ->toBe((string) $value);
 })->with([
     'two minor units'   => ['USD', 123456],
@@ -104,15 +104,15 @@ it('handles different locales properly', function (): void {
 
 it('parses money strings from different locales', function (): void {
     // US format
-    expect(MoneyFormatter::parseDecimal('1,234.56', Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::parseToMinor('1,234.56', Currency::fromCode('USD'), 'en_US'))
         ->toEqual('123456');
 
     // European format
-    expect(MoneyFormatter::parseDecimal('1.234,56', Currency::fromCode('EUR'), 'de_DE'))
+    expect(MoneyFormatter::parseToMinor('1.234,56', Currency::fromCode('EUR'), 'de_DE'))
         ->toEqual('123456');
 
     // Swedish format
-    expect(MoneyFormatter::parseDecimal('1 234,56', Currency::fromCode('SEK'), 'sv_SE'))
+    expect(MoneyFormatter::parseToMinor('1 234,56', Currency::fromCode('SEK'), 'sv_SE'))
         ->toEqual('123456');
 });
 
@@ -128,8 +128,8 @@ it('formats and parses a currency outside ISO 4217', function (): void {
     $formatted = MoneyFormatter::formatFromMinor(100000000, $btc, 'en_US', showCurrencySymbol: false);
 
     expect($formatted)->toBe('1.00000000')
-        ->and(MoneyFormatter::parseDecimal($formatted, $btc, 'en_US'))->toBe('100000000')
-        ->and(MoneyFormatter::parseDecimal('0.00000001', $btc, 'en_US'))->toBe('1');
+        ->and(MoneyFormatter::parseToMinor($formatted, $btc, 'en_US'))->toBe('100000000')
+        ->and(MoneyFormatter::parseToMinor('0.00000001', $btc, 'en_US'))->toBe('1');
 });
 
 // A currency symbol is the one thing ICU cannot supply for a currency it has no data for.
@@ -148,7 +148,7 @@ it('still refuses to put a symbol on a currency outside ISO 4217', function (): 
 it('parses back what it formats in strict mode', function (string $currency, string $locale): void {
     $formatted = MoneyFormatter::formatFromMinor(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false);
 
-    expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), $locale, strict: true))
+    expect(MoneyFormatter::parseToMinor($formatted, Currency::fromCode($currency), $locale, strict: true))
         ->toBe('123456');
 })->with([
     'dollars'                  => ['USD', 'en_US'],

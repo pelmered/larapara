@@ -68,7 +68,7 @@ the setting.
 `format()`, `formatFromMinor()` and the `formatShort()` pair took two decimals for every currency and now
 take the minor unit of the currency, which changes the output for 39 of the 179 bundled currencies: `¥1,000.00`
 is `¥1,000`, and `BHD 1,234.57` for 1234567 fils is `BHD 1,234.567`. Pass `decimals:` to get the old
-number back for a specific call. `parseDecimal()` already scaled by the currency, so formatting and
+number back for a specific call. `parseToMinor()` already scaled by the currency, so formatting and
 parsing now agree in both directions.
 
 `getFormattingRules()->fractionDigits` reports the minor unit of the currency it is given rather than
@@ -77,12 +77,12 @@ ICU's, which is 2 for anything outside ISO 4217 — a crypto currency with eight
 The abbreviated part of `formatShort()` still carries two decimals whatever the currency, since ¥1.23M
 says three digits that ¥1M would lose. Below the abbreviation threshold the currency decides.
 
-## `parseDecimal()` no longer takes `$decimals`
+## `parseToMinor()` no longer takes `$decimals`
 
 The parameter never did anything: a number formatter reads every decimal a string carries whatever its
 fraction digits are set to, so the scale always came from the currency. Calls that passed it positionally
-have to drop it — `parseDecimal($value, $currency, $locale, $decimals, $strict)` becomes
-`parseDecimal($value, $currency, $locale, $strict)`.
+have to drop it — `parseToMinor($value, $currency, $locale, $decimals, $strict)` becomes
+`parseToMinor($value, $currency, $locale, $strict)`.
 
 ## Amounts and numbers are formatted by different methods
 
@@ -128,6 +128,29 @@ means the value is a plain number.
 currency at a different magnitude, and it disagreed with `format()`, which ignored the argument. Each half
 is its own method now, with one input shape and no argument to ignore.
 
+## `parseToMinor()` is the new name of `parseDecimal()`, and it reads a currency symbol
+
+The name says what it returns — the minor units of the currency you pass, as a numeric string — the way
+`formatFromMinor()` says what it takes. `parseDecimal` described its input, which `parse` already implies.
+
+It also accepts an amount written with the symbol of that currency, where the locale puts it, since that is
+what the formatter writes:
+
+```php
+MoneyFormatter::parseToMinor('$1,234.56', $usd, 'en_US');  // '123456'  (was ParserException)
+MoneyFormatter::parseToMinor('USD 12', $usd, 'en_US');     // '1200'    (was ParserException)
+MoneyFormatter::parseToMinor('12 USD', $usd, 'en_US');     // ParserException, as before
+MoneyFormatter::parseToMinor('€10', $usd, 'en_US');        // ParserException — that is not this currency
+```
+
+`'12 USD'` stays refused because `en_US` writes the currency in front, not behind; `'USD 12'` is now read
+for the same reason. A symbol belonging to another currency is refused rather than converted, which ICU's
+own currency parser would not do on its own.
+
+Strict mode accepts the notation this configuration writes — the symbol, or the ISO code when
+`intl_currency_symbol` is on — with the space the locale puts beside it. The other notation, and a space a
+keyboard produced instead of the one CLDR names, are forgiven only when strict mode is off.
+
 ## An amount in a currency outside ISO 4217 formats and parses
 
 `formatFromMinor(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
@@ -138,10 +161,10 @@ ICU's data for the currency, so without it the minor unit of the currency is eno
 MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
 // 1.00000000
 
-MoneyFormatter::parseDecimal('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
+MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
 ```
 
-`parseDecimal()` scales by the same minor unit, so the round trip holds for those currencies too. This
+`parseToMinor()` scales by the same minor unit, so the round trip holds for those currencies too. This
 also fixes the `MoneyString` validation rule, which raised `UnknownCurrencyException` out of the parser
 for a crypto currency instead of reporting a validation failure. Formatting *with* a symbol still throws:
 ICU has no symbol to give.
@@ -224,7 +247,7 @@ Formatting cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not
 Anything that is not whole minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`. If you
 were passing a major-unit amount, multiply it by the minor unit first, or use `formatNumber()`.
 
-## `MoneyFormatter::parseDecimal()` rejects what it used to truncate
+## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
 - The whole string has to be a number in the given locale. `'12 USD'`, `'1.2.3'`, `'0x1A'` and `'NaN'` now
   throw `ParserException`, as the documentation always said they would, rather than returning the part that
