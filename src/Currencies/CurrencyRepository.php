@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Currencies;
 
+use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -9,19 +12,26 @@ use Illuminate\Support\Facades\Config;
 use Pelmered\LaraPara\Currencies\Providers\CryptoCurrenciesProvider;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
 
 class CurrencyRepository
 {
+    public const CACHE_KEY = 'larapara_currencies';
+
     public static function isValid(Currency $currency): bool
     {
-        return static::getAvailableCurrencies()->contains($currency);
+        // By code, since Collection::contains() compares whole objects: a currency built from just a
+        // code would not equal the one in the registry, which carries its name and minor unit too.
+        return static::isValidCode($currency->getCode());
     }
 
     public static function isValidCode(string $currencyCode): bool
     {
         try {
-            return static::isValid(Currency::fromCode($currencyCode));
+            Currency::fromCode($currencyCode);
+
+            return true;
         } catch (UnsupportedCurrency) {
             return false;
         }
@@ -29,26 +39,52 @@ class CurrencyRepository
 
     public static function getAvailableCurrencies(): CurrencyCollection
     {
-        $config = Config::get('larapara.currency_cache', [
-            'type' => false,
-            'ttl'  => 0,
-        ]);
+        $config = Config::get('larapara.currency_cache', []);
+        $ttl    = data_get($config, 'ttl', 0);
 
         $callback = function (): CurrencyCollection {
             return static::loadAvailableCurrencies();
         };
 
-        return match ($config['type']) {
-            'remember' => Cache::remember('larapara_currencies', $config['ttl'], $callback),
-            'flexible' => Cache::flexible('larapara_currencies', $config['ttl'], $callback),
-            'forever'  => Cache::rememberForever('larapara_currencies', $callback),
+        // Read defensively and coerced per type: the TTL can be set from the environment, where
+        // everything is a string, and each type takes a different shape of it. Passing the wrong
+        // shape does not fail loudly — a string TTL is read one character at a time and an array one
+        // becomes the int 1, so the cache quietly lives for seconds instead of months.
+        return match (data_get($config, 'type')) {
+            'remember' => Cache::remember(static::CACHE_KEY, static::secondsTtl($ttl), $callback),
+            'flexible' => Cache::flexible(static::CACHE_KEY, static::flexibleTtl($ttl), $callback),
+            'forever'  => Cache::rememberForever(static::CACHE_KEY, $callback),
             default    => $callback(),
         };
     }
 
     public static function clearCache(): void
     {
-        Cache::forget('larapara_currencies');
+        Cache::forget(static::CACHE_KEY);
+
+        // The flexible type keeps the age of the entry under a companion key of its own.
+        Cache::forget(Repository::FLEXIBLE_CREATED_KEY_PREFIX.static::CACHE_KEY);
+    }
+
+    /**
+     * The TTL as a number of seconds, which is what the `remember` type takes.
+     */
+    protected static function secondsTtl(mixed $ttl): int
+    {
+        return (int) (is_array($ttl) ? reset($ttl) : $ttl);
+    }
+
+    /**
+     * The TTL as the [fresh, stored] pair `flexible` takes, from either shape of the config value.
+     */
+    #[Returns('array{0: int, 1: int}')]
+    protected static function flexibleTtl(mixed $ttl): array
+    {
+        if (is_array($ttl)) {
+            return [(int) ($ttl[0] ?? 0), (int) ($ttl[1] ?? $ttl[0] ?? 0)];
+        }
+
+        return [(int) $ttl, (int) $ttl];
     }
 
     #[Throws(BindingResolutionException::class)]

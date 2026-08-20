@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Casts;
 
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
@@ -7,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Money\Currency as MoneyCurrency;
 use Money\Money;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Returns;
@@ -95,9 +98,18 @@ class MoneyCast implements CastsAttributes
 
     protected function getCurrencyFromModel(Model $model, string $name): MoneyCurrency
     {
-        $currency = $model->{$name.config('larapara.currency_column_suffix', '_currency')} ?? (string) (config('larapara.default_currency'));
+        $currency = $model->{$name.config('larapara.currency_column_suffix', '_currency')} ?? config('larapara.default_currency');
 
-        return $currency instanceof MoneyCurrency ? $currency : new MoneyCurrency($currency);
+        if ($currency instanceof MoneyCurrency) {
+            return $currency;
+        }
+
+        // Cast explicitly: where the currency column is cast with CurrencyCast, as the README
+        // prescribes, the attribute is a Currency object, and it used to reach Money\Currency's string
+        // parameter only because this file did not declare strict types.
+        $code = trim((string) $currency);
+
+        return new MoneyCurrency($code !== '' ? $code : throw new UnsupportedCurrency($code));
     }
 
     public function getDecimals(string $currencyCode): int

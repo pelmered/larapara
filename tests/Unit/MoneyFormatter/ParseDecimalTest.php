@@ -442,3 +442,9 @@ it('still refuses a separator class member that follows the decimal separator', 
     'de_CH, right quote' => ['de_CH', 'CHF', "12.34\u{2019}56"],
     'sv_SE, space'       => ['sv_SE', 'SEK', "12,34\u{0020}56"],
 ]);
+
+// The second reading asks ICU for the separators of the locale, which used to be a ValueError rather
+// than a parse for the empty locale that every other intl call reads as the default one.
+it('gives a misplaced separator a second reading in the default locale too', function (): void {
+    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), ''))->toBe('20000');
+});

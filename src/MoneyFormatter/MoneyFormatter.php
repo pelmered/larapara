@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\MoneyFormatter;
 
+use Locale;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
 use Money\Exception\ParserException;
@@ -29,6 +32,11 @@ class MoneyFormatter
      * places than this would round it down to 1.00 rather than to the 1.01 that was typed.
      */
     private const PARSE_DECIMAL_PLACES = 14;
+
+    /**
+     * The character ICU substitutes the currency symbol for in a pattern.
+     */
+    private const CURRENCY_PLACEHOLDER = "\u{a4}";
 
     /**
      * Characters that stand for one another as a grouping separator.
@@ -186,7 +194,7 @@ class MoneyFormatter
     {
         $config          = config('larapara');
         $currencyCode    = $currency->getCode();
-        $numberFormatter = new NumberFormatter($locale.'@currency='.$currencyCode, NumberFormatter::CURRENCY);
+        $numberFormatter = new NumberFormatter(self::currencyKeywordLocale($locale, $currencyCode), NumberFormatter::CURRENCY);
 
         $currencySymbol = $currencyCode;
 
@@ -353,10 +361,11 @@ class MoneyFormatter
 
         $numberFormatter = new NumberFormatter($locale, $style);
 
-        $isCurrencyStyle = $style === NumberFormatter::CURRENCY || $style === NumberFormatter::CURRENCY_ACCOUNTING;
-
+        // Decided by the pattern rather than by an enumeration of styles, since ICU has more currency
+        // styles than the two most common ones — cash rounding and the standard variant among them —
+        // and every one of them renders the currency placeholder.
         // Before the decimals, since the pattern carries its own fraction digits.
-        if ($isCurrencyStyle && $config['intl_currency_symbol']) {
+        if ($config['intl_currency_symbol'] && str_contains($numberFormatter->getPattern(), self::CURRENCY_PLACEHOLDER)) {
             $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
         }
 
@@ -383,7 +392,18 @@ class MoneyFormatter
      */
     private static function intlCurrencyPattern(string $pattern): string
     {
-        return preg_replace('/\x{00A4}+/u', "\u{a4}\u{a4}", $pattern) ?? $pattern;
+        return preg_replace('/\x{00A4}+/u', self::CURRENCY_PLACEHOLDER.self::CURRENCY_PLACEHOLDER, $pattern) ?? $pattern;
+    }
+
+    /**
+     * The locale ICU needs to report the rules of a currency the locale itself does not use.
+     *
+     * An empty locale stands for the default one to every other intl call, but appending a keyword to
+     * it makes an identifier ICU refuses outright, so it is resolved before the keyword goes on.
+     */
+    private static function currencyKeywordLocale(string $locale, string $currencyCode): string
+    {
+        return ($locale === '' ? Locale::getDefault() : $locale).'@currency='.$currencyCode;
     }
 
     /**

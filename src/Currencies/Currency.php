@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Currencies;
 
 use Money\Currency as MoneyCurrency;

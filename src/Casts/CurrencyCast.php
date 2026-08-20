@@ -1,12 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Casts;
 
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use Illuminate\Database\Eloquent\Model;
 use Pelmered\LaraPara\Currencies\Currency;
 use PhpStaticAnalysis\Attributes\Param;
-use Spatie\LaravelData\Casts\Cast;
 
 /**
  * @implements CastsAttributes<Currency, Currency>

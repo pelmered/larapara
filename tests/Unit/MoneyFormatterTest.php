@@ -2,6 +2,7 @@
 
 namespace Pelmered\LaraPara\Tests;
 
+use Locale;
 use Money\Currency as MoneyCurrency;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
@@ -298,12 +299,33 @@ it('formats to the international currency symbol in the accounting style', funct
         ->and(replaceNonBreakingSpaces($negative))->toEqual('(USD 1,234.56)');
 });
 
+// ICU has more currency styles than the two PHP names, and every one of them renders the placeholder.
+it('formats to the international currency symbol in the other currency styles', function (int $outputStyle): void {
+    config(['larapara.intl_currency_symbol' => true]);
+
+    $result = MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', $outputStyle);
+
+    expect(replaceNonBreakingSpaces($result))->toEqual('USD 1,234.56');
+})->with([
+    'cash currency'     => [13],
+    'standard currency' => [16],
+]);
+
 it('gets the formatting rules of the given currency', function (): void {
     expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('US$');
 
     config(['larapara.intl_currency_symbol' => true]);
 
     expect(MoneyFormatter::getFormattingRules('sv_SE', Currency::fromCode('USD'))->currencySymbol)->toBe('USD');
+});
+
+// Appending the currency keyword to an empty locale makes an identifier ICU refuses outright, while
+// every other intl call reads the empty one as the default locale.
+it('gets the formatting rules of the default locale for an empty locale', function (): void {
+    $currency = Currency::fromCode('USD');
+
+    expect(MoneyFormatter::getFormattingRules('', $currency))
+        ->toEqual(MoneyFormatter::getFormattingRules(Locale::getDefault(), $currency));
 });
 
 // ICU locale keywords only accept 3 character currency codes, so longer ones fall back to the

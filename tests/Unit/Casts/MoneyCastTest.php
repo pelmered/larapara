@@ -4,6 +4,7 @@ use Illuminate\Database\Eloquent\Model;
 use Money\Currency;
 use Money\Money;
 use Pelmered\LaraPara\Casts\MoneyCast;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\Tests\Support\Models\Post;
 
 class TestModel extends Model
@@ -14,8 +15,7 @@ class TestModel extends Model
 
     protected $casts = [
         'price'        => MoneyCast::class,
-        'price_eur'    => MoneyCast::class.':EUR',
-        'price_custom' => MoneyCast::class.':currency_field',
+        'price_custom' => MoneyCast::class,
     ];
 
     protected $fillable = ['amount', 'currency'];
@@ -68,11 +68,9 @@ it('casts null to null', function (): void {
     expect($casted)->toBeNull();
 });
 
-it('casts to Money with specified currency in cast definition', function (): void {
-    // For a MoneyCast with a currency, test directly with the constructor argument
+it('casts to Money with the currency set on the model', function (): void {
     $cast = new MoneyCast;
 
-    // We need to set up the model with the proper currency field
     $model                  = new TestModel;
     $model->amount_currency = 'EUR'; // Explicitly set the currency field
 
@@ -111,6 +109,16 @@ it('casts to Money with currency from another field', function (): void {
     expect($model->price_custom)->toBeInstanceOf(Money::class)
         ->and($model->price_custom->getAmount())->toBe('12345')
         ->and($model->price_custom->getCurrency()->getCode())->toBe('SEK');
+});
+
+// An empty currency column has no currency to read, and a Money\Currency built from an empty code
+// only fails later, somewhere that cannot say which column it came from.
+it('refuses to read an amount whose currency column is empty', function (): void {
+    $model                        = new TestModel;
+    $model->price_custom          = 12345;
+    $model->price_custom_currency = '';
+
+    expect(fn (): ?Money => $model->price_custom)->toThrow(UnsupportedCurrency::class);
 });
 
 it('sets value from Money object', function (): void {
