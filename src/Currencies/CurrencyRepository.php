@@ -52,6 +52,7 @@ class CurrencyRepository
     }
 
     #[Throws(BindingResolutionException::class)]
+    #[Throws(UnsupportedCurrency::class)]
     protected static function loadAvailableCurrencies(): CurrencyCollection
     {
         $currencyProvider    = Config::get('larapara.currency_provider', ISOCurrenciesProvider::class);
@@ -82,12 +83,22 @@ class CurrencyRepository
             $availableCurrencies = explode(',', $availableCurrencies);
         }
 
+        // Codes come from configuration and from the provider, so neither side can be trusted to be
+        // normalized. Both are keyed the same way here so the lookup below cannot silently miss.
+        $currencies = array_change_key_case($currencies, CASE_UPPER);
+
         return new CurrencyCollection(
             Arr::mapWithKeys($availableCurrencies,
                 static function (string $currencyCode) use ($currencies): array {
+                    $currencyCode = strtoupper(trim($currencyCode));
+
+                    if (! array_key_exists($currencyCode, $currencies)) {
+                        throw new UnsupportedCurrency($currencyCode);
+                    }
+
                     return [
                         $currencyCode => new Currency(
-                            strtoupper($currencyCode),
+                            $currencyCode,
                             $currencies[$currencyCode]['currency'] ?? '',
                             $currencies[$currencyCode]['minorUnit'],
                         ),

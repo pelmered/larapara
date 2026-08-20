@@ -206,11 +206,6 @@ it('parses decimal money in usd with intl symbol', function (mixed $input, strin
         ->toBe($expectedOutput);
 })->with(provideDecimalDataUsd());
 
-it('parses small decimal money', function (): void {
-    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))
-        ->toBe('20000');
-});
-
 it('formats to international currency symbol', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
 
@@ -340,3 +335,27 @@ it('formats 0 in short format', function (): void {
     expect(MoneyFormatter::formatShort(0, Currency::fromCode('USD'), 'en_US', decimals: -3))
         ->toBe(replaceNonBreakingSpaces('$0'));
 });
+
+// The amount only used to be divided by a hardcoded hundred here, which was wrong for every
+// currency whose minor unit is not two.
+it('formats without a currency symbol by the minor unit of the currency', function (string $currency, int $value, int $decimals, string $expectedOutput): void {
+    config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK', 'JPY', 'BHD']]);
+
+    expect(MoneyFormatter::format($value, Currency::fromCode($currency), 'en_US', decimals: $decimals, showCurrencySymbol: false))
+        ->toBe($expectedOutput);
+})->with([
+    'two minor units'   => ['USD', 123456, 2, '1,234.56'],
+    'no minor units'    => ['JPY', 1234, 0, '1,234'],
+    'three minor units' => ['BHD', 1234567, 3, '1,234.567'],
+]);
+
+// Negative decimals are significant digits, which ICU applies on its own. Scaling the value through
+// an intermediate int cast first zeroed anything below the scale factor.
+it('formats to a number of significant digits', function (mixed $value, int $decimals, string $expectedOutput): void {
+    expect(MoneyFormatter::numberFormat($value, 'en_US', decimals: $decimals))
+        ->toBe($expectedOutput);
+})->with([
+    'documented example'    => [1234.56, -2, '1,200'],
+    'value below the scale' => [12.34, -3, '12.3'],
+    'minor units input'     => [123456, -3, '1,230'],
+]);

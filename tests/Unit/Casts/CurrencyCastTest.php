@@ -4,6 +4,7 @@ namespace Pelmered\LaraPara\Tests\Unit\Casts;
 
 use Money\Currency as MoneyCurrency;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\Tests\Support\Models\Post;
 
 beforeEach(function (): void {
@@ -49,7 +50,32 @@ it('sets currency from currency instance', function (): void {
 
 it('sets currency from money currency instance', function (): void {
     $model                 = Post::factory()->make();
-    $model->price_currency = new MoneyCurrency('GBP');
+    $model->price_currency = new MoneyCurrency('EUR');
 
-    expect($model->getAttributes()['price_currency'])->toBe('GBP');
+    expect($model->getAttributes()['price_currency'])->toBe('EUR');
 });
+
+it('normalizes the currency code it stores', function (mixed $value): void {
+    $model                 = Post::factory()->make();
+    $model->price_currency = $value;
+
+    expect($model->getAttributes()['price_currency'])->toBe('SEK');
+})->with([
+    'lower case' => ['sek'],
+    'mixed case' => ['Sek'],
+    'padded'     => [' SEK '],
+]);
+
+// get() resolves the column through Currency::fromCode(), so a code this configuration does not
+// know has to be refused on the way in rather than read back as an exception.
+it('refuses a currency that is not available', function (mixed $value): void {
+    $model = Post::factory()->make();
+
+    expect(function () use ($model, $value): void {
+        $model->price_currency = $value;
+    })->toThrow(UnsupportedCurrency::class);
+})->with([
+    'money currency instance' => [new MoneyCurrency('GBP')],
+    'string'                  => ['GBP'],
+    'not a currency at all'   => ['nonsense'],
+]);

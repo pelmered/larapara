@@ -29,12 +29,13 @@ class MoneyCast implements CastsAttributes
 
         $currency = $this->getCurrencyFromModel($model, $key);
 
-        $value = (int) (config('larapara.store.format') === 'decimal'
-            // ? $value * 10 ** $this->getDecimals($currency->getCode() ?? MoneyFormatter::getDefaultCurrency()->getCode())
-            ? $value * 10 ** $this->getDecimals($currency->getCode())
-            : $value);
+        $amount = config('larapara.store.format') === 'decimal'
+            // Rounded, because scaling the stored decimal back is not exact in binary floating
+            // point: 19.99 * 100 is 1998.9999999999998, which truncates to a cent too little.
+            ? (int) round((float) $value * 10 ** $this->getDecimals($currency->getCode()))
+            : (int) $value;
 
-        return new Money($value, $currency);
+        return new Money($amount, $currency);
     }
 
     /**
@@ -45,14 +46,23 @@ class MoneyCast implements CastsAttributes
     #[Returns('array<string, int|float|string|null>')]
     public function set(Model $model, string $key, mixed $value, array $attributes): array
     {
-        $amount   = $this->getAmount($model, $key, $value);
-        $currency = $this->getCurrency($model, $key, $value);
+        $amount      = $this->getAmount($model, $key, $value);
+        $currency    = $this->getCurrency($model, $key, $value);
+        $currencyKey = $key.config('larapara.currency_column_suffix', '_currency');
+
+        // Before the format branch, since dividing null by the scale factor would store a zero.
+        if ($amount === null) {
+            return [
+                $key         => null,
+                $currencyKey => $currency,
+            ];
+        }
 
         return [
             $key => config('larapara.store.format') === 'decimal'
                 ? $amount / 10 ** $this->getDecimals($currency)
                 : $amount,
-            $key.config('larapara.currency_column_suffix', '_currency') => $currency,
+            $currencyKey => $currency,
         ];
     }
 
@@ -72,11 +82,15 @@ class MoneyCast implements CastsAttributes
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]
     protected function getCurrency(Model $model, string $key, Money|array|int|string|null $value): string
     {
-        return match (true) {
+        $currency = match (true) {
             $value instanceof Money => $value->getCurrency(),
             is_array($value)        => $value['currency'] ?? $value[1] ?? null,
-            default                 => $this->getCurrencyFromModel($model, $key)->getCode(),
-        } ?? MoneyFormatter::getDefaultCurrency()->getCode();
+            default                 => $this->getCurrencyFromModel($model, $key),
+        } ?? MoneyFormatter::getDefaultCurrency();
+
+        // Validated on the way in, since the read path resolves the column through
+        // Currency::fromCode() and would throw for a code this configuration does not know.
+        return Currency::toCode($currency);
     }
 
     protected function getCurrencyFromModel(Model $model, string $name): MoneyCurrency
@@ -88,12 +102,6 @@ class MoneyCast implements CastsAttributes
 
     public function getDecimals(string $currencyCode): int
     {
-        $currency = Currency::fromCode($currencyCode);
-
-        if ($currency->minorUnit) {
-            return $currency->minorUnit;
-        }
-
-        return 2;
+        return Currency::fromCode($currencyCode)->minorUnit ?? 2;
     }
 }

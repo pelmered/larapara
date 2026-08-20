@@ -41,14 +41,8 @@ class CurrencyCast implements CastsAttributes
             return null;
         }
 
-        if ($value instanceof \Money\Currency) {
-            return $value->getCode();
-        }
-
-        if ($value instanceof Currency) {
-            return $value->getCode();
-        }
-
-        return (string) $value;
+        // Validated and normalized on the way in, since get() resolves the column through
+        // Currency::fromCode() and would throw for a code this configuration does not know.
+        return Currency::toCode($value);
     }
 }

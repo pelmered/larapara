@@ -5,6 +5,7 @@ namespace Pelmered\LaraPara\Currencies;
 use Money\Currency as MoneyCurrency;
 use Money\Money;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+use PhpStaticAnalysis\Attributes\Throws;
 
 class Currency implements \Stringable
 {
@@ -22,6 +23,20 @@ class Currency implements \Stringable
 
         return CurrencyRepository::getAvailableCurrencies()->get($currencyCode)
                ?? throw new UnsupportedCurrency($currencyCode);
+    }
+
+    /**
+     * Resolves any supported currency representation to a validated, normalized currency code.
+     */
+    #[Throws(UnsupportedCurrency::class)]
+    public static function toCode(self|MoneyCurrency|\Stringable|string $currency): string
+    {
+        $currencyCode = match (true) {
+            $currency instanceof self, $currency instanceof MoneyCurrency => $currency->getCode(),
+            default                                                       => (string) $currency,
+        };
+
+        return static::fromCode(trim($currencyCode))->getCode();
     }
 
     public static function fromMoneyCurrency(MoneyCurrency $currency): self

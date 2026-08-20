@@ -6,7 +6,24 @@ use Mockery as M;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
 use Pelmered\LaraPara\Currencies\CurrencyRepository;
+use Pelmered\LaraPara\Currencies\Providers\CurrenciesProvider;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+
+class LowerCasedCurrenciesProvider implements CurrenciesProvider
+{
+    public function loadCurrencies(): array
+    {
+        return [
+            'usd' => [
+                'alphabeticCode' => 'usd',
+                'currency'       => 'US Dollar',
+                'minorUnit'      => 2,
+                'numericCode'    => 840,
+            ],
+        ];
+    }
+}
 
 beforeEach(function (): void {
     // Clear cache between tests
@@ -167,4 +184,38 @@ it('loads crypto currencies when enabled', function (): void {
     expect($currencies)->toBeInstanceOf(CurrencyCollection::class)
         ->and($currencies->has('USD'))->toBeTrue()
         ->and($currencies->has('EUR'))->toBeTrue();
+});
+
+// A configured code is used as an array key against the provider's list, so an unnormalized one used
+// to take every request down with "Undefined array key" on the first currency read.
+it('normalizes the configured currency codes', function (mixed $availableCurrencies): void {
+    Config::set('larapara.available_currencies', $availableCurrencies);
+
+    expect(CurrencyRepository::getAvailableCurrencies()->keys()->all())->toBe(['USD', 'EUR'])
+        ->and(Currency::fromCode('EUR')->minorUnit)->toBe(2);
+})->with([
+    'as configured'               => [['USD', 'EUR']],
+    'lower case'                  => [['usd', 'eur']],
+    'padded'                      => [[' USD ', 'EUR ']],
+    'comma separated'             => ['USD,EUR'],
+    'comma separated with spaces' => ['USD, EUR'],
+]);
+
+it('refuses a configured currency the provider does not know', function (mixed $availableCurrencies): void {
+    Config::set('larapara.available_currencies', $availableCurrencies);
+
+    expect(fn (): CurrencyCollection => CurrencyRepository::getAvailableCurrencies())
+        ->toThrow(UnsupportedCurrency::class);
+})->with([
+    'unknown code'          => [['USD', 'XXY']],
+    'crypto without crypto' => [['USD', 'BTC']],
+]);
+
+it('takes the currency codes of a provider that keys them differently', function (): void {
+    Config::set('larapara.currency_provider', LowerCasedCurrenciesProvider::class);
+    Config::set('larapara.available_currencies', ['USD']);
+
+    expect(Currency::fromCode('USD'))
+        ->getCode()->toBe('USD')
+        ->minorUnit->toBe(2);
 });
