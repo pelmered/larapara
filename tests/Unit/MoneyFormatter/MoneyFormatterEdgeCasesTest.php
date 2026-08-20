@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Money\Exception\UnknownCurrencyException;
+use Money\Money;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -132,16 +132,35 @@ it('formats and parses a currency outside ISO 4217', function (): void {
         ->and(MoneyFormatter::parseToMinor('0.00000001', $btc, 'en_US'))->toBe('1');
 });
 
-// A currency symbol is the one thing ICU cannot supply for a currency it has no data for.
-it('still refuses to put a symbol on a currency outside ISO 4217', function (): void {
+// ICU writes the code where it has no symbol, so the only thing that ever stood in the way was the
+// formatter being handed ISO 4217 alone to place the decimal point by.
+it('puts the code on a currency outside ISO 4217', function (): void {
     config([
         'larapara.load_crypto_currencies' => true,
         'larapara.available_currencies'   => ['USD', 'BTC'],
     ]);
 
-    expect(fn (): string => MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US'))
-        ->toThrow(UnknownCurrencyException::class);
+    $btc = Currency::fromCode('BTC');
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(100000000, $btc, 'en_US')))
+        ->toBe('BTC 1.00000000')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::format(new Money('100000000', $btc->toMoneyCurrency()), 'en_US')))
+        ->toBe('BTC 1.00000000')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor(123456789000, $btc, 'en_US')))
+        ->toBe('BTC 1.23K');
 });
+
+// The aggregate is ISO first, so a currency ISO covers is placed by ISO's data either way.
+it('places an ISO currency by ISO data', function (string $currency, int $value, string $expectedOutput): void {
+    config(['larapara.available_currencies' => ['USD', 'JPY', 'BHD']]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US')))
+        ->toBe($expectedOutput);
+})->with([
+    'two minor units'   => ['USD', 123456, '$1,234.56'],
+    'no minor units'    => ['JPY', 1234, '¥1,234'],
+    'three minor units' => ['BHD', 1234567, 'BHD 1,234.567'],
+]);
 
 // Strict parsing accepts only what the locale itself writes, which is what the formatter writes, so
 // the round trip holds in strict mode too — including the locales whose separators are not typeable.

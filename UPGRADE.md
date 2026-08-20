@@ -195,21 +195,24 @@ forgiveness, so strict mode refuses it.
 
 ## An amount in a currency outside ISO 4217 formats and parses
 
-`formatFromMinor(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
-currency, because it placed the decimal point from ISO 4217 data. The symbol is the only part that needs
-ICU's data for the currency, so without it the minor unit of the currency is enough:
+Formatting a crypto currency used to throw `UnknownCurrencyException`, because the decimal point was
+placed from ISO 4217 data alone. The minor unit of the currency is placed alongside it now, in both
+directions, so the round trip holds for those currencies too:
 
 ```php
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US');
+// BTC 1.00000000
+
 MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
 // 1.00000000
 
 MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
 ```
 
-`parseToMinor()` scales by the same minor unit, so the round trip holds for those currencies too. This
-also fixes the `MoneyString` validation rule, which raised `UnknownCurrencyException` out of the parser
-for a crypto currency instead of reporting a validation failure. Formatting *with* a symbol still throws:
-ICU has no symbol to give.
+ICU has no *symbol* for such a currency, so it writes the code where the symbol would go — which is all
+that crypto support is missing, rather than the exception it used to be. This also fixes the `MoneyString`
+validation rule, which raised `UnknownCurrencyException` out of the parser for a crypto currency instead
+of reporting a validation failure.
 
 ## A currency's minor unit is read from its code
 

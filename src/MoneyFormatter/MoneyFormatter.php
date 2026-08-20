@@ -141,17 +141,14 @@ class MoneyFormatter
             );
         }
 
-        $money = new Money(
-            self::toMinorUnits($value),
-            $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
-        );
+        $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
         $moneyFormatter = new IntlMoneyFormatter(
             self::getNumberFormatter($locale, $outputStyle, $decimals, $significantDigits),
-            new ISOCurrencies,
+            self::currenciesFor($moneyCurrency, $minorUnit),
         );
 
-        return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
+        return $moneyFormatter->format(new Money(self::toMinorUnits($value), $moneyCurrency));  // "$1.234,56"
     }
 
     /**
@@ -341,7 +338,7 @@ class MoneyFormatter
             // last representable digit of the double would decide it instead.
             $decimalString = sprintf('%.'.self::PARSE_DECIMAL_PLACES.'F', $parsed);
 
-            return (new DecimalMoneyParser(self::parseCurrencies($currency, $minorUnit)))
+            return (new DecimalMoneyParser(self::currenciesFor($currency, $minorUnit)))
                 ->parse($decimalString, $currency)
                 ->getAmount();
         } catch (ParserException $parserException) {
@@ -350,15 +347,15 @@ class MoneyFormatter
     }
 
     /**
-     * The currency data the parser scales its result by.
+     * The currency data a formatter or a parser places the decimal point by.
      *
      * ISO 4217 first, since it is authoritative for the currencies it covers, with the minor unit of
-     * the currency being parsed behind it — otherwise a currency ISO has never heard of could be
-     * formatted but not read back, and the exception for it is not one a caller can catch as a
-     * parse failure.
+     * the currency in hand behind it — otherwise a currency ISO has never heard of throws an
+     * exception that is neither a parse failure a caller can catch nor anything ICU could not have
+     * rendered: ICU writes the code as the symbol for a currency it has no symbol for.
      */
     #[Param(minorUnit: 'int<0, max>')]
-    private static function parseCurrencies(MoneyCurrency $currency, int $minorUnit): Currencies
+    private static function currenciesFor(MoneyCurrency $currency, int $minorUnit): Currencies
     {
         return new AggregateCurrencies([
             new ISOCurrencies,

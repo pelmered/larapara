@@ -924,28 +924,29 @@ A crypto currency list ships with the package, but is not loaded by default:
 MONEY_LOAD_CRYPTO_CURRENCIES=true
 ```
 
-Support for them is partial, since crypto currencies are not part of ISO 4217 and `intl` has no data for
-them. `Currency::fromCode('BTC')` works and gives you the right minor unit (8), and `getFormattingRules()`
-returns the currency code as the symbol and its eight fraction digits, but formatting an amount *with* a
-currency symbol through `formatFromMinor()` or `format()` throws `Money\Exception\UnknownCurrencyException`.
-
-Everything else works, because the symbol is the only part ICU needs its own data for. Leave it out and
-add your own:
+Crypto currencies are not part of ISO 4217, so their minor unit comes from the package's own registry
+rather than from ICU — `Currency::fromCode('BTC')` gives you the right one (8), and formatting and parsing
+both scale by it:
 
 ```php
 // 100000000 minor units = 1 BTC
-MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false).' BTC';
-// 1.00000000 BTC
-```
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US');
+// BTC 1.00000000
 
-`parseToMinor()` reads it back the same way, scaling by the minor unit of the currency you pass:
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
+// 1.00000000
 
-```php
 MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
 ```
 
-Pass a bare `Money\Currency` rather than a LaraPara `Currency` and there is no minor unit to read, so
-both directions fall back to two decimals.
+ICU has no *symbol* for a currency outside ISO 4217, so it writes the code where the symbol would go and
+places it the way the locale places a symbol. That is the only part of the output crypto support is
+missing, and it is what `getFormattingRules()->currencySymbol` reports too.
+
+The minor unit is read from the code, so it does not matter which object you hold: a bare
+`Money\Currency` is looked up in the registry the same way a LaraPara `Currency` carries it. A code no
+currency list has — one you built a `Money\Currency` for by hand — has nothing to read, and falls back to
+two decimals in both directions.
 
 The crypto list carries no names of its own, so `Currency::name` is the code for those — `BTC - BTC` in a
 select array.
