@@ -166,12 +166,12 @@ function provideDecimalDataUsd(): array
 }
 
 it('formats money in usd', function (mixed $input, string $expectedOutput): void {
-    expect(MoneyFormatter::formatAmount($input, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor($input, Currency::fromCode('USD'), 'en_US'))
         ->toBe(replaceNonBreakingSpaces($expectedOutput));
 })->with(provideMoneyDataUsd());
 
 it('formats money in sek', function (mixed $input, string $expectedOutput): void {
-    $result        = MoneyFormatter::formatAmount($input, Currency::fromCode('SEK'), 'sv_SE');
+    $result        = MoneyFormatter::formatFromMinor($input, Currency::fromCode('SEK'), 'sv_SE');
     $cleanResult   = replaceNonBreakingSpaces($result);
     $cleanExpected = replaceNonBreakingSpaces($expectedOutput);
 
@@ -179,12 +179,12 @@ it('formats money in sek', function (mixed $input, string $expectedOutput): void
 })->with(provideMoneyDataSek());
 
 it('formats decimal money with US locale', function (mixed $input, string $expectedOutput): void {
-    expect(MoneyFormatter::formatAmount($input, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
+    expect(MoneyFormatter::formatFromMinor($input, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
         ->toBe(replaceNonBreakingSpaces($expectedOutput));
 })->with(provideDecimalMoneyDataUsd());
 
 it('formats decimal money with Swedish locale', function (mixed $input, string $expectedOutput): void {
-    $result        = MoneyFormatter::formatAmount($input, Currency::fromCode('SEK'), 'sv_SE', showCurrencySymbol: false);
+    $result        = MoneyFormatter::formatFromMinor($input, Currency::fromCode('SEK'), 'sv_SE', showCurrencySymbol: false);
     $cleanResult   = replaceNonBreakingSpaces($result);
     $cleanExpected = replaceNonBreakingSpaces($expectedOutput);
 
@@ -211,7 +211,7 @@ it('parses decimal money in usd with intl symbol', function (mixed $input, strin
 it('formats to international currency symbol', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result        = MoneyFormatter::formatAmount(100000, Currency::fromCode('USD'), 'en_US');
+    $result        = MoneyFormatter::formatFromMinor(100000, Currency::fromCode('USD'), 'en_US');
     $cleanResult   = replaceNonBreakingSpaces($result);
     $cleanExpected = replaceNonBreakingSpaces('USD 1,000.00');
 
@@ -221,7 +221,7 @@ it('formats to international currency symbol', function (): void {
 it('formats to international currency symbol as suffix', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result        = MoneyFormatter::formatAmount(100000, Currency::fromCode('SEK'), 'sv_SE');
+    $result        = MoneyFormatter::formatFromMinor(100000, Currency::fromCode('SEK'), 'sv_SE');
     $cleanResult   = replaceNonBreakingSpaces($result);
     $cleanExpected = replaceNonBreakingSpaces('1 000,00 SEK');
 
@@ -233,7 +233,7 @@ it('formats to international currency symbol as suffix', function (): void {
 it('formats to the international currency symbol of the formatted currency', function (string $locale, string $expectedOutput): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result = MoneyFormatter::formatAmount(12345, Currency::fromCode('USD'), $locale);
+    $result = MoneyFormatter::formatFromMinor(12345, Currency::fromCode('USD'), $locale);
 
     expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
 })->with([
@@ -246,7 +246,7 @@ it('formats to the international currency symbol of the formatted currency', fun
 it('formats negative amounts with the international currency symbol', function (string $locale, string $expectedOutput): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result = MoneyFormatter::formatAmount(-12345, Currency::fromCode('USD'), $locale);
+    $result = MoneyFormatter::formatFromMinor(-12345, Currency::fromCode('USD'), $locale);
 
     expect(replaceNonBreakingSpaces($result))->toEqual($expectedOutput);
 })->with([
@@ -258,7 +258,7 @@ it('formats negative amounts with the international currency symbol', function (
 it('abbreviates with the international currency symbol of the formatted currency', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result = MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'sv_SE');
+    $result = MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'sv_SE');
 
     expect(replaceNonBreakingSpaces($result))->toEqual('1,23M USD');
 });
@@ -271,10 +271,10 @@ it('formats to the international currency symbol in right to left locales', func
 
     foreach ([123456, -123456] as $amount) {
         config(['larapara.intl_currency_symbol' => false]);
-        $plain = MoneyFormatter::formatAmount($amount, Currency::fromCode('USD'), $locale);
+        $plain = MoneyFormatter::formatFromMinor($amount, Currency::fromCode('USD'), $locale);
 
         config(['larapara.intl_currency_symbol' => true]);
-        $formatted = MoneyFormatter::formatAmount($amount, Currency::fromCode('USD'), $locale);
+        $formatted = MoneyFormatter::formatFromMinor($amount, Currency::fromCode('USD'), $locale);
 
         // Compared against what ICU itself does for the locale rather than against fixed output:
         // CLDR reshapes these patterns between ICU releases and the test matrix spans several of
@@ -292,8 +292,8 @@ it('formats to the international currency symbol in right to left locales', func
 it('formats to the international currency symbol in the accounting style', function (): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $positive = MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
-    $negative = MoneyFormatter::formatAmount(-123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+    $positive = MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
+    $negative = MoneyFormatter::formatFromMinor(-123456, Currency::fromCode('USD'), 'en_US', NumberFormatter::CURRENCY_ACCOUNTING);
 
     // The accounting style brackets negatives instead of signing them, which the pattern keeps.
     expect(replaceNonBreakingSpaces($positive))->toEqual('USD 1,234.56')
@@ -304,7 +304,7 @@ it('formats to the international currency symbol in the accounting style', funct
 it('formats to the international currency symbol in the other currency styles', function (int $outputStyle): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    $result = MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', $outputStyle);
+    $result = MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', $outputStyle);
 
     expect(replaceNonBreakingSpaces($result))->toEqual('USD 1,234.56');
 })->with([
@@ -317,16 +317,16 @@ it('formats to the international currency symbol in the other currency styles', 
 it('formats the same call differently when the symbol setting changes', function (): void {
     config(['larapara.intl_currency_symbol' => false]);
 
-    expect(MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
+    expect(MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
 
     config(['larapara.intl_currency_symbol' => true]);
 
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US')))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US')))
         ->toBe('USD 1,234.56');
 
     config(['larapara.intl_currency_symbol' => false]);
 
-    expect(MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
+    expect(MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US'))->toBe('$1,234.56');
 });
 
 it('gets the formatting rules of the given currency', function (): void {
@@ -357,14 +357,14 @@ it('gets the formatting rules of a currency ICU does not know', function (): voi
 });
 
 it('formats with decimal parameter', function (): void {
-    expect(MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US'))
         ->toBe(replaceNonBreakingSpaces('$1,234.56'))
-        ->and(MoneyFormatter::formatAmount(123456, Currency::fromCode('USD'), 'en_US', decimals: 0))
+        ->and(MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', decimals: 0))
         ->toBe(replaceNonBreakingSpaces('$1,235'));
 });
 
 it('formats with decimal parameter in sek', function (): void {
-    $result        = MoneyFormatter::formatAmount(100060, Currency::fromCode('SEK'), 'sv_SE', decimals: 0);
+    $result        = MoneyFormatter::formatFromMinor(100060, Currency::fromCode('SEK'), 'sv_SE', decimals: 0);
     $cleanResult   = replaceNonBreakingSpaces($result);
     $cleanExpected = replaceNonBreakingSpaces('1 001 kr');
 
@@ -372,7 +372,7 @@ it('formats with decimal parameter in sek', function (): void {
 });
 
 it('formats 0 in short format', function (): void {
-    expect(MoneyFormatter::formatShort(0, Currency::fromCode('USD'), 'en_US', decimals: -3))
+    expect(MoneyFormatter::formatShortFromMinor(0, Currency::fromCode('USD'), 'en_US', decimals: -3))
         ->toBe(replaceNonBreakingSpaces('$0'));
 });
 
@@ -381,7 +381,7 @@ it('formats 0 in short format', function (): void {
 it('formats without a currency symbol by the minor unit of the currency', function (string $currency, int $value, int $decimals, string $expectedOutput): void {
     config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK', 'JPY', 'BHD']]);
 
-    expect(MoneyFormatter::formatAmount($value, Currency::fromCode($currency), 'en_US', decimals: $decimals, showCurrencySymbol: false))
+    expect(MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US', decimals: $decimals, showCurrencySymbol: false))
         ->toBe($expectedOutput);
 })->with([
     'two minor units'   => ['USD', 123456, 2, '1,234.56'],
@@ -415,13 +415,23 @@ it('formats the number it is given, whatever the type', function (mixed $value, 
     'zero as a float'        => [0.0, '0.00'],
 ]);
 
-// Money::getAmount() returns the minor units as a numeric string, which is an amount rather than a
-// number, so it goes through the method that takes a currency.
-it('formats the amount of a Money object', function (): void {
+// A Money carries its own currency, and its amount is the minor units of that currency — the two
+// entry points are the same amount either way round.
+it('formats a Money object and its amount alike', function (): void {
     $money = new Money(123456, new MoneyCurrency('USD'));
 
-    expect(MoneyFormatter::formatAmount($money, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
-        ->toBe('1,234.56')
-        ->and(MoneyFormatter::formatAmount($money->getAmount(), Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
-        ->toBe('1,234.56');
+    expect(MoneyFormatter::format($money, 'en_US'))->toBe('$1,234.56')
+        ->and(MoneyFormatter::format($money, 'en_US', showCurrencySymbol: false))->toBe('1,234.56')
+        ->and(MoneyFormatter::formatFromMinor($money->getAmount(), Currency::fromCode('USD'), 'en_US'))
+        ->toBe('$1,234.56');
+});
+
+// The amount comes from the Money and so does the currency, where formatShort() used to take the
+// amount from one and the minor unit and symbol from the other.
+it('abbreviates a Money object by its own currency', function (): void {
+    config(['larapara.available_currencies' => ['USD', 'JPY']]);
+
+    $yen = new Money(123456789, new MoneyCurrency('JPY'));
+
+    expect(MoneyFormatter::formatShort($yen, 'en_US'))->toBe('¥123.46M');
 });

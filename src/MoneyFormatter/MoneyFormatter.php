@@ -78,20 +78,35 @@ class MoneyFormatter
         ["\u{0027}", "\u{2019}", "\u{02bc}"],
     ];
 
-    public static function formatMoney(
+    /**
+     * Formats a Money object, which carries both the amount and the currency it is counted in.
+     */
+    public static function format(
         Money $money,
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
         ?int $decimals = null,
+        bool $showCurrencySymbol = true,
     ): string {
-        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals ?? self::getMinorUnit($money->getCurrency()));
-        $moneyFormatter  = new IntlMoneyFormatter($numberFormatter, new ISOCurrencies);
-
-        return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
+        return static::formatFromMinor(
+            $money->getAmount(),
+            $money->getCurrency(),
+            $locale,
+            $outputStyle,
+            $decimals,
+            $showCurrencySymbol,
+        );
     }
 
-    public static function formatAmount(
-        null|int|string|Money $value,
+    /**
+     * Formats an amount given in the minor units of a currency: 123456 in USD is $1,234.56.
+     *
+     * Which is what every amount in this package is — what MoneyCast stores, what Money::getAmount()
+     * returns and what parseDecimal() reads a string into. An amount that is not whole minor units
+     * throws rather than being truncated into a plausible wrong one.
+     */
+    public static function formatFromMinor(
+        null|int|string $value,
         Currency|MoneyCurrency $currency,
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
@@ -100,11 +115,6 @@ class MoneyFormatter
     ): string {
         if ($value === '' || $value === null) {
             return '';
-        }
-
-        if ($value instanceof Money) {
-            $currency = $value->getCurrency();
-            $value    = $value->getAmount();
         }
 
         $minorUnit = self::getMinorUnit($currency);
@@ -121,7 +131,12 @@ class MoneyFormatter
             $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
         );
 
-        return static::formatMoney($money, $locale, $outputStyle, $decimals);
+        $moneyFormatter = new IntlMoneyFormatter(
+            self::getNumberFormatter($locale, $outputStyle, $decimals),
+            new ISOCurrencies,
+        );
+
+        return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
     }
 
     /**
@@ -129,7 +144,7 @@ class MoneyFormatter
      *
      * A number rather than an amount: nothing here is scaled, since a count of minor units means
      * nothing without the currency that says how many of them make a unit. Amounts go through
-     * formatAmount(), which takes that currency.
+     * formatFromMinor(), which takes that currency.
      */
     public static function formatNumber(
         null|int|float|string $value,
@@ -145,17 +160,34 @@ class MoneyFormatter
         return (string) $numberFormatter->format((float) $value);  // Outputs something like "1.234,56"
     }
 
+    /**
+     * Abbreviates a Money object: $1.23M rather than $1,234,567.89.
+     */
     public static function formatShort(
-        null|int|string|Money $value,
+        Money $money,
+        string $locale,
+        ?int $decimals = null,
+        bool $showCurrencySymbol = true,
+    ): string {
+        return static::formatShortFromMinor(
+            $money->getAmount(),
+            $money->getCurrency(),
+            $locale,
+            $decimals,
+            $showCurrencySymbol,
+        );
+    }
+
+    /**
+     * Abbreviates an amount given in the minor units of a currency.
+     */
+    public static function formatShortFromMinor(
+        null|int|string $value,
         Currency|MoneyCurrency $currency,
         string $locale,
         ?int $decimals = null,
-        bool $showCurrencySymbol = true
+        bool $showCurrencySymbol = true,
     ): string {
-        if ($value instanceof Money) {
-            $value = $value->getAmount();
-        }
-
         if ($value === '' || $value === null) {
             return '';
         }
@@ -164,7 +196,7 @@ class MoneyFormatter
 
         // No need to abbreviate if the amount is less than 1000
         if (abs($major) < 1000) {
-            return static::formatAmount($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
+            return static::formatFromMinor($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
         }
 
         $mantissaDecimals = $decimals ?? self::ABBREVIATED_DECIMALS;

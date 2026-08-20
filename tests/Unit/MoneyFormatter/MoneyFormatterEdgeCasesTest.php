@@ -16,28 +16,28 @@ beforeEach(function (): void {
 
 it('formats large values in short format', function (): void {
     // Testing millions
-    expect(MoneyFormatter::formatShort(1000000, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatShortFromMinor(1000000, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$10.00K');
 
     // Testing thousands
-    expect(MoneyFormatter::formatShort(100000, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatShortFromMinor(100000, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$1.00K');
 });
 
 it('formats small values correctly', function (): void {
     // Testing fractions of cents
-    expect(MoneyFormatter::formatAmount(1, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor(1, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$0.01');
 
     // Testing 0
-    expect(MoneyFormatter::formatAmount(0, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor(0, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$0.00');
 });
 
 // An amount is whole minor units. Anything else used to be cast to an int, which turned it into a
 // plausible looking wrong amount instead of an error.
 it('refuses an amount that is not whole minor units', function (mixed $value): void {
-    expect(fn (): string => MoneyFormatter::formatAmount($value, Currency::fromCode('USD'), 'en_US'))
+    expect(fn (): string => MoneyFormatter::formatFromMinor($value, Currency::fromCode('USD'), 'en_US'))
         ->toThrow(InvalidAmount::class);
 })->with([
     'not a number'        => ['not-a-number'],
@@ -47,21 +47,21 @@ it('refuses an amount that is not whole minor units', function (mixed $value): v
 ]);
 
 it('formats an amount given as a numeric string', function (): void {
-    expect(MoneyFormatter::formatAmount('123456', Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor('123456', Currency::fromCode('USD'), 'en_US'))
         ->toEqual('$1,234.56')
-        ->and(MoneyFormatter::formatAmount(' -123456 ', Currency::fromCode('USD'), 'en_US'))
+        ->and(MoneyFormatter::formatFromMinor(' -123456 ', Currency::fromCode('USD'), 'en_US'))
         ->toEqual('-$1,234.56');
 });
 
 it('formats negative values correctly', function (): void {
-    expect(MoneyFormatter::formatAmount(-1500000, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatFromMinor(-1500000, Currency::fromCode('USD'), 'en_US'))
         ->toEqual('-$15,000.00');
 });
 
 // The call every application makes names no decimals, so this is the one that says what a currency
 // with a minor unit other than two renders as.
 it('formats a currency with the fraction digits of that currency', function (string $currency, int $value, string $expectedOutput): void {
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatAmount($value, Currency::fromCode($currency), 'en_US')))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US')))
         ->toBe($expectedOutput);
 })->with([
     'two minor units'   => ['USD', 12345, '$123.45'],
@@ -70,7 +70,7 @@ it('formats a currency with the fraction digits of that currency', function (str
 ]);
 
 it('lets the decimals argument override the fraction digits of the currency', function (string $currency, int $value, int $decimals, string $expectedOutput): void {
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatAmount($value, Currency::fromCode($currency), 'en_US', decimals: $decimals)))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US', decimals: $decimals)))
         ->toBe($expectedOutput);
 })->with([
     'yen with decimals' => ['JPY', 12345, 2, '¥12,345.00'],
@@ -81,7 +81,7 @@ it('lets the decimals argument override the fraction digits of the currency', fu
 // Formatting and parsing back is the round trip an application makes around a form field, and it
 // only holds while both directions take the scale from the same place.
 it('parses back what it formats', function (string $currency, int $value): void {
-    $formatted = MoneyFormatter::formatAmount($value, Currency::fromCode($currency), 'en_US', showCurrencySymbol: false);
+    $formatted = MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US', showCurrencySymbol: false);
 
     expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), 'en_US'))
         ->toBe((string) $value);
@@ -94,11 +94,11 @@ it('parses back what it formats', function (string $currency, int $value): void 
 
 it('handles different locales properly', function (): void {
     // Testing French locale
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatAmount(12345, Currency::fromCode('EUR'), 'fr_FR')))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(12345, Currency::fromCode('EUR'), 'fr_FR')))
         ->toContain('123,45');
 
     // Testing German locale
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatAmount(12345, Currency::fromCode('EUR'), 'de_DE')))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(12345, Currency::fromCode('EUR'), 'de_DE')))
         ->toContain('123,45');
 });
 
@@ -125,7 +125,7 @@ it('formats and parses a currency outside ISO 4217', function (): void {
     ]);
 
     $btc       = Currency::fromCode('BTC');
-    $formatted = MoneyFormatter::formatAmount(100000000, $btc, 'en_US', showCurrencySymbol: false);
+    $formatted = MoneyFormatter::formatFromMinor(100000000, $btc, 'en_US', showCurrencySymbol: false);
 
     expect($formatted)->toBe('1.00000000')
         ->and(MoneyFormatter::parseDecimal($formatted, $btc, 'en_US'))->toBe('100000000')
@@ -139,14 +139,14 @@ it('still refuses to put a symbol on a currency outside ISO 4217', function (): 
         'larapara.available_currencies'   => ['USD', 'BTC'],
     ]);
 
-    expect(fn (): string => MoneyFormatter::formatAmount(100000000, Currency::fromCode('BTC'), 'en_US'))
+    expect(fn (): string => MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US'))
         ->toThrow(UnknownCurrencyException::class);
 });
 
 // Strict parsing accepts only what the locale itself writes, which is what the formatter writes, so
 // the round trip holds in strict mode too — including the locales whose separators are not typeable.
 it('parses back what it formats in strict mode', function (string $currency, string $locale): void {
-    $formatted = MoneyFormatter::formatAmount(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false);
+    $formatted = MoneyFormatter::formatFromMinor(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false);
 
     expect(MoneyFormatter::parseDecimal($formatted, Currency::fromCode($currency), $locale, strict: true))
         ->toBe('123456');

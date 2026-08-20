@@ -65,8 +65,8 @@ the setting.
 
 ## Amounts are formatted with the fraction digits of their currency
 
-`formatAmount()`, `formatMoney()` and `formatShort()` took two decimals for every currency and now take the
-minor unit of the currency, which changes the output for 39 of the 179 bundled currencies: `¥1,000.00`
+`format()`, `formatFromMinor()` and the `formatShort()` pair took two decimals for every currency and now
+take the minor unit of the currency, which changes the output for 39 of the 179 bundled currencies: `¥1,000.00`
 is `¥1,000`, and `BHD 1,234.57` for 1234567 fils is `BHD 1,234.567`. Pass `decimals:` to get the old
 number back for a specific call. `parseDecimal()` already scaled by the currency, so formatting and
 parsing now agree in both directions.
@@ -93,36 +93,49 @@ named for what it takes:
 
 | Was | Is | Takes |
 |---|---|---|
-| `format()` | `formatAmount()` | minor units, plus the currency that scales them |
-| `formatNumber()` | `formatNumber()` | a number, formatted as given |
+| `formatMoney()` | `format()` | a `Money`, which carries its own currency |
+| `format()` | `formatFromMinor()` | minor units, plus the currency that scales them |
+| `formatShort()` with a `Money` | `formatShort()` | a `Money` |
+| `formatShort()` with a raw value | `formatShortFromMinor()` | minor units, plus a currency |
+| `numberFormat()` | `formatNumber()` | a number, formatted as given |
 
-- `formatAmount()` is `format()` under a new name; every argument is unchanged.
+- `format()` is the old `formatMoney()`, and it takes `showCurrencySymbol` now as well. It is the call an
+  application makes, since a `MoneyCast` attribute *is* a `Money`.
+- `formatFromMinor()` is the old `format()`: the same arguments, minus the `Money` it no longer accepts,
+  and named for the unit it takes — neither `format` nor `formatAmount` said that 123456 means $1,234.56.
 - `formatNumber()` scales nothing: `formatNumber(1234.56, 'en_US')` is `1,234.56` and
   `formatNumber(1234, 'en_US')` is `1,234.00`. Its `$minorDecimals` parameter is gone, and so is the
   `minorUnits` argument and the `number_format.minor_units` config key of the previous iteration.
-- An amount without a currency symbol — what a minor-unit value usually wants — is
-  `formatAmount($value, $currency, $locale, showCurrencySymbol: false)`.
 
 ```php
-// minor units of an amount
-MoneyFormatter::formatAmount(123456, $usd, 'en_US');                             // $1,234.56
-MoneyFormatter::formatAmount(123456, $usd, 'en_US', showCurrencySymbol: false);  // 1,234.56
+// a Money — what MoneyCast gives you
+MoneyFormatter::format($post->price, 'en_US');                                     // $1,234.56
+MoneyFormatter::format($post->price, 'en_US', showCurrencySymbol: false);           // 1,234.56
 
-// a number
-MoneyFormatter::formatNumber(1234.56, 'en_US');                                  // 1,234.56
+// minor units and the currency that counts them
+MoneyFormatter::formatFromMinor(123456, $usd, 'en_US');                            // $1,234.56
+MoneyFormatter::formatFromMinor(123456, $usd, 'en_US', showCurrencySymbol: false); // 1,234.56
+
+// a number that is not an amount
+MoneyFormatter::formatNumber(1234.56, 'en_US');                                    // 1,234.56
 ```
 
-Nothing guesses any more: a currency in the call means the value counts that currency's minor units, and
-no currency means it is a number.
+Nothing guesses any more: a `Money` carries its unit, a currency argument names it, and no currency at all
+means the value is a plain number.
+
+`formatShort()` took `Money|int|string` beside a separate currency argument, and used the amount of the
+`Money` with the minor unit and symbol of the argument — so a mismatched pair formatted a different
+currency at a different magnitude, and it disagreed with `format()`, which ignored the argument. Each half
+is its own method now, with one input shape and no argument to ignore.
 
 ## An amount in a currency outside ISO 4217 formats and parses
 
-`formatAmount(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
+`formatFromMinor(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
 currency, because it placed the decimal point from ISO 4217 data. The symbol is the only part that needs
 ICU's data for the currency, so without it the minor unit of the currency is enough:
 
 ```php
-MoneyFormatter::formatAmount(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
 // 1.00000000
 
 MoneyFormatter::parseDecimal('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
@@ -205,9 +218,9 @@ Codes from the config are trimmed and upper-cased before use, so `MONEY_AVAILABL
 works. A code the currency provider does not know now throws `UnsupportedCurrency` naming that code,
 instead of `ErrorException: Undefined array key` on the first currency read.
 
-## `MoneyFormatter::formatAmount()` refuses an amount that is not whole minor units
+## Formatting refuses an amount that is not whole minor units
 
-`formatAmount()` cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not a number'` as `$0.00`.
+Formatting cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not a number'` as `$0.00`.
 Anything that is not whole minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`. If you
 were passing a major-unit amount, multiply it by the minor unit first, or use `formatNumber()`.
 
@@ -231,7 +244,7 @@ were passing a major-unit amount, multiply it by the minor unit first, or use `f
 
 ## `MoneyFormatter::formatShort()` uses the minor unit of the currency
 
-It divided by a hardcoded 100, so it disagreed with `formatAmount()` for the 39 bundled currencies whose minor
+It divided by a hardcoded 100, so it disagreed with `formatFromMinor()` for the 39 bundled currencies whose minor
 unit is not 2 — JPY came out a hundred times low, BHD ten times high. Abbreviated output changes for those
 currencies, and the "format in full below 1000" threshold is now 1000 of the currency's major unit rather
 than 100000 minor units.
@@ -244,10 +257,10 @@ amount threw `RuntimeException('Invalid format')`. Locales whose digits are not 
 Negative amounts are abbreviated now instead of always being formatted in full, and
 `formatShort(0, ..., showCurrencySymbol: false)` no longer shows a currency symbol.
 
-## `formatAmount(..., showCurrencySymbol: false)` uses the minor unit of the currency
+## `formatFromMinor(..., showCurrencySymbol: false)` uses the minor unit of the currency
 
 It divided by a hardcoded 100 whatever the currency, so
-`formatAmount(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234.00`. A currency
+`formatFromMinor(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234.00`. A currency
 outside ISO 4217 works here too — see the section on that above.
 
 ## `formatNumber()` with negative decimals

@@ -30,7 +30,7 @@ function validateValue(mixed $value, object $rule): Illuminate\Validation\Valida
 function localizedAmount(mixed $value, string $locale, string $currency): mixed
 {
     return $value === 'localized'
-        ? MoneyFormatter::formatAmount(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false)
+        ? MoneyFormatter::formatFromMinor(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false)
         : $value;
 }
 
