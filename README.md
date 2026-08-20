@@ -278,9 +278,12 @@ Which method to call is decided by what you have in hand:
 | a localized string from a user | [`parseToMoney()`](#parsetomoney) | `'$1,234.56'` → `Money` |
 | the same, as raw minor units | [`parseToMinor()`](#parsetominor) | `'1,234.56'` → `'123456'` |
 
-For all methods that take `$decimals`: a positive value is the number of decimals, and a negative value is
-the number of significant digits, so `-2` on `12345678` gives `$120,000`. This only affects the formatted
-output; the amount itself is left alone.
+Every formatting method takes two ways of saying how precise the output is, and at most one of them:
+`$decimals` is a number of decimals, `$significantDigits` a number of significant digits, so
+`significantDigits: 2` on `12345678` minor units gives `$120,000`. Passing both throws
+`Pelmered\LaraPara\Exceptions\InvalidNumber`, since they answer the same question — as does a negative
+`$decimals`, which used to be how significant digits were asked for. Neither affects the amount itself,
+only how it is written, and ICU rounds half to even when writing it, as CLDR specifies.
 
 ### Where the formatting comes from
 
@@ -346,6 +349,7 @@ public static function format(
     string $locale,
     int $outputStyle = NumberFormatter::CURRENCY,
     ?int $decimals = null,
+    ?int $significantDigits = null,
     bool $showCurrencySymbol = true,
 ): string
 ```
@@ -353,7 +357,8 @@ public static function format(
 - `$money`: the `Money` object to format. It carries both the amount and the currency it counts.
 - `$locale`: locale string, e.g. `en_US`, `sv_SE`.
 - `$outputStyle`: a [`NumberFormatter` style constant](https://www.php.net/manual/en/class.numberformatter.php#intl.numberformatter-constants).
-- `$decimals`: decimals, or significant digits when negative. Defaults to the minor unit of the currency.
+- `$decimals`: how many decimals to write, defaulting to the minor unit of the currency.
+- `$significantDigits`: an alternative to `$decimals`, not a companion to it. Passing both throws.
 - `$showCurrencySymbol`: set to `false` to get the amount only, placed by the minor unit of the currency.
 
 This is the call an application makes, since a money attribute cast with `MoneyCast` *is* a `Money`:
@@ -388,6 +393,7 @@ public static function formatFromMinor(
     string $locale,
     int $outputStyle = NumberFormatter::CURRENCY,
     ?int $decimals = null,
+    ?int $significantDigits = null,
     bool $showCurrencySymbol = true,
 ): string
 ```
@@ -397,8 +403,9 @@ public static function formatFromMinor(
   `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than being truncated to a wrong amount.
   For a `Money` object, use [`format()`](#format).
 - `$currency`: a LaraPara `Currency` or a `Money\Currency`, which says how many minor units make a unit.
-- `$decimals`: decimals, or significant digits when negative. Defaults to the minor unit of the currency,
-  so ¥ amounts carry no decimals and BHD amounts carry three.
+- `$decimals`: how many decimals to write, defaulting to the minor unit of the currency, so ¥ amounts
+  carry no decimals and BHD amounts carry three.
+- `$significantDigits`: an alternative to `$decimals`, not a companion to it. Passing both throws.
 - `$showCurrencySymbol`: set to `false` to get the amount only, placed by the minor unit of the currency.
 
 ```php
@@ -415,7 +422,7 @@ MoneyFormatter::formatFromMinor(12345, Currency::fromCode('BHD'), 'en_US');  // 
 
 MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', decimals: 0);  // $1,235
 MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', decimals: 2);  // $1,234.56
-MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', decimals: -2); // $1,200
+MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', significantDigits: 2); // $1,200
 
 ```
 
@@ -427,12 +434,19 @@ Formats a number into a localized numeric string, without any currency.
 public static function formatNumber(
     null|int|float|string $value,
     string $locale,
-    int $decimals = 2,
+    ?int $decimals = null,
+    ?int $significantDigits = null,
 ): string
 ```
 
-- `$value`: the number to format. Non-numeric input returns an empty string.
-- `$decimals`: decimals, or significant digits when negative.
+- `$value`: a **PHP** number — an int, a float, or a numeric string such as `'1234.56'`. A string written
+  the way a locale writes it (`'1.234,56'`) is not one of those; reading that is
+  [`parseToMinor()`](#parsetominor)'s job. `null` and `''` return an empty string, and anything else
+  that is not a number throws `Pelmered\LaraPara\Exceptions\InvalidNumber` rather than rendering as
+  nothing.
+- `$decimals`: how many decimals to write. Defaults to as many as the value has, which is what the locale
+  would print.
+- `$significantDigits`: an alternative to `$decimals`, not a companion to it. Passing both throws.
 
 This formats the number it is given and scales nothing. A count of minor units means nothing without
 the currency that says how many of them make a unit, so amounts go through
@@ -443,14 +457,18 @@ use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 MoneyFormatter::formatNumber(1234.56, 'en_US');        // 1,234.56
 MoneyFormatter::formatNumber('1234.56', 'en_US');      // 1,234.56
-MoneyFormatter::formatNumber(1234, 'en_US');           // 1,234.00
-MoneyFormatter::formatNumber('1234', 'en_US');         // 1,234.00
+MoneyFormatter::formatNumber(1234, 'en_US');           // 1,234
+MoneyFormatter::formatNumber(1234.5, 'en_US');         // 1,234.5
 MoneyFormatter::formatNumber(1234.56, 'de_DE');        // 1.234,56
 MoneyFormatter::formatNumber(1234.56, 'sv_SE');        // 1 234,56
-MoneyFormatter::formatNumber('not a number', 'en_US'); // ''
 
-MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: 0);  // 1,235
-MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: -2); // 1,200
+MoneyFormatter::formatNumber(1234.5, 'en_US', decimals: 2);          // 1,234.50
+MoneyFormatter::formatNumber(1234.5678, 'en_US', decimals: 2);       // 1,234.57
+MoneyFormatter::formatNumber(1234.56, 'en_US', significantDigits: 2); // 1,200
+
+MoneyFormatter::formatNumber(null, 'en_US');           // ''
+MoneyFormatter::formatNumber('not a number', 'en_US'); // InvalidNumber
+MoneyFormatter::formatNumber('1.234,56', 'en_US');     // InvalidNumber — that is a localized string
 ```
 
 For an amount without a currency symbol — which is what a minor-unit value usually wants — use
@@ -473,6 +491,7 @@ public static function formatShort(
     Money $money,
     string $locale,
     ?int $decimals = null,
+    ?int $significantDigits = null,
     bool $showCurrencySymbol = true,
 ): string
 
@@ -481,6 +500,7 @@ public static function formatShortFromMinor(
     Currency|MoneyCurrency $currency,
     string $locale,
     ?int $decimals = null,
+    ?int $significantDigits = null,
     bool $showCurrencySymbol = true,
 ): string
 ```

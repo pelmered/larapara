@@ -7,6 +7,7 @@ use Money\Currency as MoneyCurrency;
 use Money\Money;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\InvalidNumber;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 function provideMoneyDataSek(): array
@@ -372,7 +373,7 @@ it('formats with decimal parameter in sek', function (): void {
 });
 
 it('formats 0 in short format', function (): void {
-    expect(MoneyFormatter::formatShortFromMinor(0, Currency::fromCode('USD'), 'en_US', decimals: -3))
+    expect(MoneyFormatter::formatShortFromMinor(0, Currency::fromCode('USD'), 'en_US', significantDigits: 3))
         ->toBe(replaceNonBreakingSpaces('$0'));
 });
 
@@ -391,13 +392,44 @@ it('formats without a currency symbol by the minor unit of the currency', functi
 
 // Negative decimals are significant digits, which ICU applies on its own. Scaling the value through
 // an intermediate int cast first zeroed anything below the scale factor.
-it('formats to a number of significant digits', function (mixed $value, int $decimals, string $expectedOutput): void {
-    expect(MoneyFormatter::formatNumber($value, 'en_US', decimals: $decimals))
+it('formats to a number of significant digits', function (mixed $value, int $significantDigits, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US', significantDigits: $significantDigits))
         ->toBe($expectedOutput);
 })->with([
-    'documented example'    => [1234.56, -2, '1,200'],
-    'value below the scale' => [12.34, -3, '12.3'],
-    'whole value'           => [1234, -3, '1,230'],
+    'documented example'    => [1234.56, 2, '1,200'],
+    'value below the scale' => [12.34, 3, '12.3'],
+    'whole value'           => [1234, 3, '1,230'],
+]);
+
+// The two are two ways to say how precise the output is, and ICU discards the fraction digits when
+// both are set, so asking for both is a mistake rather than a combination.
+it('refuses two kinds of precision at once', function (): void {
+    expect(fn (): string => MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: 2, significantDigits: 3))
+        ->toThrow(InvalidNumber::class);
+});
+
+it('refuses a negative number of decimals, which used to mean significant digits', function (): void {
+    expect(fn (): string => MoneyFormatter::formatNumber(1234.56, 'en_US', decimals: -3))
+        ->toThrow(InvalidNumber::class)
+        ->and(fn (): string => MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', decimals: -3))
+        ->toThrow(InvalidNumber::class);
+});
+
+// Not a number, rather than a number to render as nothing: '' used to come back for anything
+// unparseable, which hides the mistake in the caller.
+it('refuses a value that is not a number', function (mixed $value): void {
+    expect(fn (): string => MoneyFormatter::formatNumber($value, 'en_US'))->toThrow(InvalidNumber::class);
+})->with([
+    'a word'          => ['not a number'],
+    'trailing text'   => ['1234abc'],
+    'a localized one' => ['1.234,56'],
+]);
+
+it('formats nothing as nothing', function (mixed $value): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe('');
+})->with([
+    'null'         => [null],
+    'empty string' => [''],
 ]);
 
 // A number formatter formats the number it is given: the same value in any type it can arrive in
@@ -405,14 +437,28 @@ it('formats to a number of significant digits', function (mixed $value, int $dec
 it('formats the number it is given, whatever the type', function (mixed $value, string $expectedOutput): void {
     expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
 })->with([
-    'int'                    => [1234, '1,234.00'],
-    'digits as text'         => ['1234', '1,234.00'],
+    'int'                    => [1234, '1,234'],
+    'digits as text'         => ['1234', '1,234'],
     'float'                  => [1234.56, '1,234.56'],
     'decimals as text'       => ['1234.56', '1,234.56'],
-    'whole float'            => [1234.00, '1,234.00'],
-    'whole decimals as text' => ['1234.00', '1,234.00'],
-    'zero'                   => [0, '0.00'],
-    'zero as a float'        => [0.0, '0.00'],
+    'whole float'            => [1234.00, '1,234'],
+    'whole decimals as text' => ['1234.00', '1,234'],
+    'zero'                   => [0, '0'],
+    'zero as a float'        => [0.0, '0'],
+]);
+
+// The decimals of the value, since a number is not an amount and has no currency to ask.
+it('keeps the decimals of the number unless asked for others', function (mixed $value, ?int $decimals, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US', $decimals))->toBe($expectedOutput);
+})->with([
+    'as given'         => [1234.5, null, '1,234.5'],
+    'more than given'  => [1234.5, 2, '1,234.50'],
+    'fewer than given' => [1234.5678, 2, '1,234.57'],
+    // ICU rounds half to even for display, as CLDR specifies.
+    'none'              => [1234.5, 0, '1,234'],
+    'none, rounding up' => [1235.5, 0, '1,236'],
+    'a whole number'    => [1234, null, '1,234'],
+    'more than three'   => [1234.56789, 5, '1,234.56789'],
 ]);
 
 // A Money carries its own currency, and its amount is the minor units of that currency — the two

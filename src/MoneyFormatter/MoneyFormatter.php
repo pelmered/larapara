@@ -17,6 +17,7 @@ use Money\Parser\DecimalMoneyParser;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use Pelmered\LaraPara\Exceptions\InvalidNumber;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Returns;
@@ -87,6 +88,7 @@ class MoneyFormatter
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
         ?int $decimals = null,
+        ?int $significantDigits = null,
         bool $showCurrencySymbol = true,
     ): string {
         return static::formatFromMinor(
@@ -95,6 +97,7 @@ class MoneyFormatter
             $locale,
             $outputStyle,
             $decimals,
+            $significantDigits,
             $showCurrencySymbol,
         );
     }
@@ -112,19 +115,30 @@ class MoneyFormatter
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
         ?int $decimals = null,
+        ?int $significantDigits = null,
         bool $showCurrencySymbol = true,
     ): string {
         if ($value === '' || $value === null) {
             return '';
         }
 
+        self::assertDigits($decimals, $significantDigits);
+
         $minorUnit = self::getMinorUnit($currency);
-        $decimals ??= $minorUnit;
+
+        // An amount carries the decimals of its currency unless the caller asks for others, which is
+        // what makes ¥1,000 and BHD 1,234.567 come out right without being asked for.
+        $decimals ??= $significantDigits === null ? $minorUnit : null;
 
         if (! $showCurrencySymbol) {
             // Nothing here needs ICU's data for the currency — only the minor unit, to place the
             // decimal point — so this reads a currency ICU has never heard of, crypto included.
-            return static::formatNumber((float) self::toMinorUnits($value) / 10 ** $minorUnit, $locale, $decimals);
+            return static::formatNumber(
+                (float) self::toMinorUnits($value) / 10 ** $minorUnit,
+                $locale,
+                $decimals,
+                $significantDigits,
+            );
         }
 
         $money = new Money(
@@ -133,7 +147,7 @@ class MoneyFormatter
         );
 
         $moneyFormatter = new IntlMoneyFormatter(
-            self::getNumberFormatter($locale, $outputStyle, $decimals),
+            self::getNumberFormatter($locale, $outputStyle, $decimals, $significantDigits),
             new ISOCurrencies,
         );
 
@@ -141,22 +155,35 @@ class MoneyFormatter
     }
 
     /**
-     * Formats the number it is given, in the locale it is given.
+     * Formats a number in a locale: 1234.5 in de_DE is "1.234,5".
      *
-     * A number rather than an amount: nothing here is scaled, since a count of minor units means
-     * nothing without the currency that says how many of them make a unit. Amounts go through
-     * formatFromMinor(), which takes that currency.
+     * A number rather than an amount — nothing here is scaled, since a count of minor units means
+     * nothing without the currency that says how many of them make a unit, and amounts go through
+     * formatFromMinor(), which takes that currency. The value is a PHP number, not a localized
+     * string: reading one of those is parseToMinor()'s job.
+     *
+     * Without `decimals` or `significantDigits` the number keeps the decimals it has, which is what
+     * the locale would print. Empty in, empty out; anything else that is not a number is a mistake
+     * in the caller rather than a number to render as nothing.
      */
+    #[Throws(InvalidNumber::class)]
     public static function formatNumber(
         null|int|float|string $value,
         string $locale,
-        int $decimals = 2,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
     ): string {
-        if (! is_numeric($value)) {
+        if ($value === null || $value === '') {
             return '';
         }
 
-        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
+        if (! is_numeric($value)) {
+            throw InvalidNumber::notNumeric($value);
+        }
+
+        self::assertDigits($decimals, $significantDigits);
+
+        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals, $significantDigits);
 
         return (string) $numberFormatter->format((float) $value);  // Outputs something like "1.234,56"
     }
@@ -168,6 +195,7 @@ class MoneyFormatter
         Money $money,
         string $locale,
         ?int $decimals = null,
+        ?int $significantDigits = null,
         bool $showCurrencySymbol = true,
     ): string {
         return static::formatShortFromMinor(
@@ -175,6 +203,7 @@ class MoneyFormatter
             $money->getCurrency(),
             $locale,
             $decimals,
+            $significantDigits,
             $showCurrencySymbol,
         );
     }
@@ -187,32 +216,44 @@ class MoneyFormatter
         Currency|MoneyCurrency $currency,
         string $locale,
         ?int $decimals = null,
+        ?int $significantDigits = null,
         bool $showCurrencySymbol = true,
     ): string {
         if ($value === '' || $value === null) {
             return '';
         }
 
+        self::assertDigits($decimals, $significantDigits);
+
         $major = (float) self::toMinorUnits($value) / 10 ** self::getMinorUnit($currency);
 
         // No need to abbreviate if the amount is less than 1000
         if (abs($major) < 1000) {
-            return static::formatFromMinor($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
+            return static::formatFromMinor(
+                $value,
+                $currency,
+                $locale,
+                decimals: $decimals,
+                significantDigits: $significantDigits,
+                showCurrencySymbol: $showCurrencySymbol,
+            );
         }
 
-        $mantissaDecimals = $decimals ?? self::ABBREVIATED_DECIMALS;
+        // Two decimals unless the caller says otherwise, since ¥1.23M keeps three significant digits
+        // that the zero minor units of the yen would drop.
+        $mantissaDecimals = $significantDigits === null ? $decimals ?? self::ABBREVIATED_DECIMALS : null;
 
-        [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals);
+        [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals ?? self::ABBREVIATED_DECIMALS);
 
         if (! $showCurrencySymbol) {
-            return static::formatNumber($mantissa, $locale, decimals: $mantissaDecimals).$suffix;
+            return static::formatNumber($mantissa, $locale, $mantissaDecimals, $significantDigits).$suffix;
         }
 
         // The suffix goes into the ICU pattern rather than into the formatted output, which leaves
         // the symbol, its placement, the digits of the locale and its directional marks to ICU.
         $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
-        return (string) self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $mantissaDecimals, numberSuffix: $suffix)
+        return (string) self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $mantissaDecimals, $significantDigits, numberSuffix: $suffix)
             ->formatCurrency($mantissa, $moneyCurrency->getCode());
     }
 
@@ -398,6 +439,28 @@ class MoneyFormatter
         $defaultCurrencyCode = (string) (config('larapara.default_currency'));
 
         return Currency::fromCode($defaultCurrencyCode);
+    }
+
+    /**
+     * Refuses a request for two kinds of precision at once, or for a negative amount of it.
+     *
+     * A negative `decimals` used to mean significant digits, which no signature said and no reader
+     * could guess, so it is a mistake now rather than a second meaning.
+     */
+    #[Throws(InvalidNumber::class)]
+    private static function assertDigits(?int $decimals, ?int $significantDigits): void
+    {
+        if ($decimals !== null && $significantDigits !== null) {
+            throw InvalidNumber::conflictingDigits();
+        }
+
+        if ($decimals !== null && $decimals < 0) {
+            throw InvalidNumber::negativeDecimals($decimals);
+        }
+
+        if ($significantDigits !== null && $significantDigits < 1) {
+            throw InvalidNumber::significantDigitsBelowOne($significantDigits);
+        }
     }
 
     /**
@@ -630,7 +693,8 @@ class MoneyFormatter
     private static function getNumberFormatter(
         string $locale,
         int $style,
-        int $decimals = 2,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
         string $numberSuffix = '',
     ): NumberFormatter {
         $intlCurrencySymbol = (bool) config('larapara.intl_currency_symbol');
@@ -639,12 +703,20 @@ class MoneyFormatter
         // few combinations come back on every row of a listing. The key carries everything the object
         // is built from, the config among it, since a formatter that is right for one setting writes
         // the wrong symbol under the other. Nothing mutates one after it is stored.
-        $key = implode('|', [$locale, $style, $decimals, $numberSuffix, (int) $intlCurrencySymbol]);
+        $key = implode('|', [
+            $locale,
+            $style,
+            $decimals          ?? 'default',
+            $significantDigits ?? 'default',
+            $numberSuffix,
+            (int) $intlCurrencySymbol,
+        ]);
 
         return self::$numberFormatters[$key] ??= self::buildNumberFormatter(
             $locale,
             $style,
             $decimals,
+            $significantDigits,
             $numberSuffix,
             $intlCurrencySymbol,
         );
@@ -653,7 +725,8 @@ class MoneyFormatter
     private static function buildNumberFormatter(
         string $locale,
         int $style,
-        int $decimals,
+        ?int $decimals,
+        ?int $significantDigits,
         string $numberSuffix,
         bool $intlCurrencySymbol,
     ): NumberFormatter {
@@ -671,9 +744,11 @@ class MoneyFormatter
             $numberFormatter->setPattern(self::numberSuffixPattern($numberFormatter->getPattern(), $numberSuffix));
         }
 
-        if ($decimals < 0) {
-            $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, abs($decimals));
-        } else {
+        // Neither given leaves the digits of the locale in place, which for a plain number is as many
+        // decimals as the value has.
+        if ($significantDigits !== null) {
+            $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, $significantDigits);
+        } elseif ($decimals !== null) {
             $numberFormatter->setAttribute(NumberFormatter::FRACTION_DIGITS, $decimals);
         }
 

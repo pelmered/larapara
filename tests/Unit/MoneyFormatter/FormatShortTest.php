@@ -130,8 +130,15 @@ it('abbreviates with the requested number of decimals', function (int $decimals,
     expect(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US', decimals: $decimals))
         ->toBe($expectedOutput);
 })->with([
-    'none'               => [0, '$1M'],
-    'one'                => [1, '$1.2M'],
-    'two'                => [2, '$1.23M'],
-    'significant digits' => [-3, '$1.23M'],
+    'none' => [0, '$1M'],
+    'one'  => [1, '$1.2M'],
+    'two'  => [2, '$1.23M'],
+]);
+
+it('abbreviates to a number of significant digits', function (int $significantDigits, string $expectedOutput): void {
+    expect(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US', significantDigits: $significantDigits))
+        ->toBe($expectedOutput);
+})->with([
+    'one'   => [1, '$1M'],
+    'three' => [3, '$1.23M'],
 ]);

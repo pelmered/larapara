@@ -128,6 +128,31 @@ means the value is a plain number.
 currency at a different magnitude, and it disagreed with `format()`, which ignored the argument. Each half
 is its own method now, with one input shape and no argument to ignore.
 
+## Precision is asked for by name, and `formatNumber()` formats numbers
+
+Every formatting method documented "a negative `$decimals` means significant digits", which no signature
+said and no reader could guess. It is a named `$significantDigits` parameter now, and a negative
+`$decimals` throws `Pelmered\LaraPara\Exceptions\InvalidNumber`:
+
+```php
+MoneyFormatter::formatFromMinor(123456, $usd, 'en_US', significantDigits: 2); // $1,200
+MoneyFormatter::formatFromMinor(123456, $usd, 'en_US', decimals: -2);         // InvalidNumber
+```
+
+The two are alternatives rather than companions — ICU discards the fraction digits when both are set —
+so passing both throws as well.
+
+`formatNumber()` also stops behaving like a money formatter in two ways:
+
+- **It keeps the decimals the value has.** `formatNumber(1234, 'en_US')` was `1,234.00` and is `1,234`;
+  `formatNumber(1234.5, 'en_US')` was `1,234.50` and is `1,234.5`. Pass `decimals: 2` for the old output.
+  A number has no currency to ask for a minor unit, so the locale's own digits are the only sensible
+  default, and forcing two was money's answer to a question about numbers.
+- **A value that is not a number throws** `InvalidNumber` instead of returning `''`. `null` and `''` still
+  return `''` — nothing in, nothing out — but `'not a number'` and `'1.234,56'` (a *localized* string,
+  which is `parseToMinor()`'s business) are mistakes in the caller rather than something to render as
+  nothing. Silently returning `''` hid them, the way `format('not a number')` returning `$0.00` used to.
+
 ## `parseToMoney()` reads a string into a Money
 
 The inverse of `format()`, and the bookend the parse side was missing: callers were building
