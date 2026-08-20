@@ -142,3 +142,19 @@ it('abbreviates to a number of significant digits', function (int $significantDi
     'one'   => [1, '$1M'],
     'three' => [3, '$1.23M'],
 ]);
+
+// $999,600 is 999.6 thousand, which every precision below four digits writes as 1000 — and 1,000K is
+// not an abbreviation of anything, so the magnitude has to carry with the rounding that caused it.
+it('carries into the next magnitude when the mantissa rounds up', function (array $precision, string $expectedOutput): void {
+    expect(MoneyFormatter::formatShortFromMinor(99960000, Currency::fromCode('USD'), 'en_US', ...$precision))
+        ->toBe($expectedOutput);
+})->with([
+    'default'               => [[], '$999.60K'],
+    'two decimals'          => [['decimals' => 2], '$999.60K'],
+    'one decimal'           => [['decimals' => 1], '$999.6K'],
+    'no decimals'           => [['decimals' => 0], '$1M'],
+    'one significant digit' => [['significantDigits' => 1], '$1M'],
+    'two significant'       => [['significantDigits' => 2], '$1M'],
+    'three significant'     => [['significantDigits' => 3], '$1M'],
+    'four significant'      => [['significantDigits' => 4], '$999.6K'],
+]);

@@ -240,7 +240,7 @@ class MoneyFormatter
         // that the zero minor units of the yen would drop.
         $mantissaDecimals = $significantDigits === null ? $decimals ?? self::ABBREVIATED_DECIMALS : null;
 
-        [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals ?? self::ABBREVIATED_DECIMALS);
+        [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals, $significantDigits);
 
         if (! $showCurrencySymbol) {
             return static::formatNumber($mantissa, $locale, $mantissaDecimals, $significantDigits).$suffix;
@@ -524,19 +524,38 @@ class MoneyFormatter
      * Splits a major amount into a mantissa below one thousand and its magnitude suffix.
      */
     #[Returns('array{0: float, 1: string}')]
-    private static function abbreviate(float $major, int $decimals): array
+    private static function abbreviate(float $major, ?int $decimals, ?int $significantDigits): array
     {
         $lastMagnitude = count(self::ABBREVIATIONS) - 1;
         $magnitude     = min((int) (log10(abs($major)) / 3), $lastMagnitude);
         $mantissa      = $major / 10 ** ($magnitude * 3);
 
-        // Rounding to the requested decimals can carry the mantissa into the next magnitude.
-        if ($magnitude < $lastMagnitude && abs(round($mantissa, max($decimals, 0))) >= 1000) {
+        // Rounding to the precision the output carries can take the mantissa into the next
+        // magnitude, and 1,000K is not an abbreviation of anything.
+        $rounded = self::roundToPrecision($mantissa, $decimals, $significantDigits);
+
+        if ($magnitude < $lastMagnitude && abs($rounded) >= 1000) {
             $magnitude++;
             $mantissa /= 1000;
         }
 
         return [$mantissa, self::ABBREVIATIONS[$magnitude]];
+    }
+
+    /**
+     * A number rounded the way the output will write it, in decimals or in significant digits.
+     */
+    private static function roundToPrecision(float $value, ?int $decimals, ?int $significantDigits): float
+    {
+        if ($significantDigits === null) {
+            return round($value, max($decimals ?? self::ABBREVIATED_DECIMALS, 0));
+        }
+
+        // Significant digits count from the first one, so how many decimals they leave depends on
+        // how many integer digits there are: 999.6 to one significant digit is 1000, not 999.6.
+        $integerDigits = (int) floor(log10(abs($value))) + 1;
+
+        return round($value, max($significantDigits - $integerDigits, 0));
     }
 
     /**
