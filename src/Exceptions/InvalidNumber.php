@@ -11,7 +11,7 @@ class InvalidNumber extends InvalidArgumentException
     public static function notNumeric(mixed $value): self
     {
         return new self(
-            'The value '.var_export($value, true).' is not a number. '
+            'The given '.get_debug_type($value).' is not a number. '
             .'MoneyFormatter::formatNumber() takes an int, a float or a numeric string; '
             .'a string written the way a locale writes it is read by parseToMinor().'
         );

@@ -445,6 +445,16 @@ it('refuses a value that is not a number', function (mixed $value): void {
     'a localized one' => ['1.234,56'],
 ]);
 
+// A value that is not a number is usually input that was never validated, and the message it lands in
+// goes to the log, so the message names the type it was given rather than repeating the value.
+it('keeps the rejected value out of the exception message', function (): void {
+    $value = '4111111111111111';
+
+    expect(InvalidNumber::notNumeric($value)->getMessage())
+        ->not->toContain($value)
+        ->toContain('string');
+});
+
 it('formats nothing as nothing', function (mixed $value): void {
     expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe('');
 })->with([
