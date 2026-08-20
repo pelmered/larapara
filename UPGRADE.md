@@ -280,20 +280,20 @@ Each money column needs a corresponding currency column with the name {money_col
 For new columns
 ```php
 Schema::table('tablename', function (Blueprint $table) {
-    $table->money('price'); // This will create two columns, 'price' (integer) and 'price_currency' (varchar(6))
+    $table->money('price'); // This will create two columns, 'price' (integer) and 'price_currency' (varchar(12))
 });
 ```
 For an existing amount column, in this case a column called `price`, add the currency column as nullable,
 backfill the rows you already have, and only then make it required:
 ```php
 Schema::table('tablename', function (Blueprint $table) {
-    $table->string('price_currency', 6)->nullable()->after('price');
+    $table->string('price_currency', 12)->nullable()->after('price');
 });
 
 DB::table('tablename')->whereNull('price_currency')->update(['price_currency' => 'USD']);
 
 Schema::table('tablename', function (Blueprint $table) {
-    $table->string('price_currency', 6)->nullable(false)->change();
+    $table->string('price_currency', 12)->nullable(false)->default('USD')->change();
     $table->index(['price_currency', 'price']);
 });
 ```
