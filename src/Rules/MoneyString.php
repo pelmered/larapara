@@ -22,8 +22,14 @@ use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
  */
 class MoneyString implements ValidationRule
 {
+    /**
+     * @param  mixed  $currency  A currency object or a code. Deliberately untyped, because the
+     *                           idiomatic call passes `$request->input('price_currency')` straight
+     *                           in, and a client is free to send an array there: anything that is
+     *                           not a code is the default currency rather than a TypeError.
+     */
     public function __construct(
-        protected Currency|MoneyCurrency|string|null $currency = null,
+        protected mixed $currency = null,
         protected ?string $locale = null,
         protected ?bool $strict = null,
     ) {}
@@ -57,8 +63,12 @@ class MoneyString implements ValidationRule
             return $this->currency;
         }
 
+        $code = is_string($this->currency) || $this->currency instanceof \Stringable
+            ? trim((string) $this->currency)
+            : '';
+
         try {
-            return Currency::fromCode(trim((string) ($this->currency ?? config('larapara.default_currency'))));
+            return Currency::fromCode($code !== '' ? $code : (string) config('larapara.default_currency'));
         } catch (UnsupportedCurrency) {
             return MoneyFormatter::getDefaultCurrency();
         }

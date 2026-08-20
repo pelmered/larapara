@@ -795,9 +795,9 @@ Validates that a string is an amount `parseToMinor()` can read, in the same loca
 
 ```php
 new MoneyString(
-    Currency|MoneyCurrency|string|null $currency = null,  // defaults to config('larapara.default_currency')
-    ?string $locale = null,                               // defaults to app()->getLocale()
-    ?bool $strict = null,                                 // defaults to config('larapara.parse.strict')
+    mixed $currency = null,    // a Currency, a Money\Currency or a code; defaults to config('larapara.default_currency')
+    ?string $locale = null,    // defaults to app()->getLocale()
+    ?bool $strict = null,      // defaults to config('larapara.parse.strict')
 )
 ```
 
@@ -815,7 +815,8 @@ it was given — *"The price field must be a valid amount, such as 1 234,56."*
 Whether the currency itself is supported is `SupportedCurrency`'s business: an unsupported one here does not
 fail the amount, because the scale of a currency does not decide whether a string is a number. That way a bad
 currency and a bad amount each report their own problem, and passing `$request->input('price_currency')`
-straight in cannot turn into an exception.
+straight in cannot turn into an exception — the parameter is `mixed` for that reason, since a client is free
+to send an array where a code was expected, and anything that is not a code is read as the default currency.
 
 ### `SupportedCurrency`
 
