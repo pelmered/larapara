@@ -343,7 +343,7 @@ Negative amounts are abbreviated now instead of always being formatted in full, 
 ## `formatFromMinor(..., showCurrencySymbol: false)` uses the minor unit of the currency
 
 It divided by a hardcoded 100 whatever the currency, so
-`formatFromMinor(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234.00`. A currency
+`formatFromMinor(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234`. A currency
 outside ISO 4217 works here too — see the section on that above.
 
 ## `formatNumber()` with negative decimals
@@ -461,5 +461,7 @@ MONEY_AVAILABLE_CURRENCIES=USD,EUR,GBP
 ```php
 MoneyFormatter::formatAsDecimal(123456, Currency::fromCode('USD')); // Output: $1,234.56
 // should be changed to:
-MoneyFormatter::formatNumber(123456, 'en_US'); // Output: 1,234.56
+// formatNumber() takes a plain number and does not convert from minor units,
+// so divide by 100 (or use formatFromMinor() with showCurrencySymbol: false).
+MoneyFormatter::formatNumber(1234.56, 'en_US'); // Output: 1,234.56
 ```
