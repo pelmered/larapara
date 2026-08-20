@@ -537,30 +537,38 @@ currency, so `'1.005'` is `101` cents.
 
 #### What is accepted
 
-**The currency may be written beside the amount**, where the locale puts it, because that is what
+**The currency may be written beside the amount**, because that is what
 [`formatFromMinor()`](#formatfromminor) writes — a field that displays `$1,234.56` posts that string back,
-and a parser that refuses its own output is a trap:
+and a parser that refuses its own output is a trap. Its symbol or its ISO code, in front or behind, with
+or without a space:
 
 ```php
 MoneyFormatter::parseToMinor('$1,234.56', Currency::fromCode('USD'), 'en_US');           // '123456'
 MoneyFormatter::parseToMinor('-$1,234.56', Currency::fromCode('USD'), 'en_US');          // '-123456'
+MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US');              // '1200'
+MoneyFormatter::parseToMinor('USD 12', Currency::fromCode('USD'), 'en_US');              // '1200'
 MoneyFormatter::parseToMinor("1\u{a0}234,56\u{a0}kr", Currency::fromCode('SEK'), 'sv_SE'); // '123456'
+MoneyFormatter::parseToMinor('1 234,56 kr', Currency::fromCode('SEK'), 'sv_SE');         // '123456'
 ```
 
-It has to be *that* currency: ICU reads any currency's symbol, so `'€10'` read as USD throws rather than
-becoming ten dollars. And it has to be where the locale writes it — `'USD 12'` is read in `en_US`, where
-the currency goes in front, while `'12 USD'` is not.
-
-**The whole string has to be a number.** ICU stops reading at the first character it cannot make sense of,
-so anything left over means the string was not an amount, and it throws `Money\Exception\ParserException`
-rather than returning the part that did parse:
+It has to be *that* currency, written once. ICU reads any currency's symbol, so a mismatch would silently
+convert:
 
 ```php
-MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US'); // ParserException
-MoneyFormatter::parseToMinor('€10', Currency::fromCode('USD'), 'en_US');    // ParserException
-MoneyFormatter::parseToMinor('1.2.3', Currency::fromCode('USD'), 'en_US');  // ParserException
-MoneyFormatter::parseToMinor('0x1A', Currency::fromCode('USD'), 'en_US');   // ParserException
-MoneyFormatter::parseToMinor('NaN', Currency::fromCode('USD'), 'en_US');    // ParserException
+MoneyFormatter::parseToMinor('€10', Currency::fromCode('USD'), 'en_US');       // ParserException
+MoneyFormatter::parseToMinor('12 EUR', Currency::fromCode('USD'), 'en_US');    // ParserException
+MoneyFormatter::parseToMinor('12 USD USD', Currency::fromCode('USD'), 'en_US'); // ParserException
+```
+
+**Otherwise the whole string has to be a number.** ICU stops reading at the first character it cannot make
+sense of, so anything left over means the string was not an amount, and it throws
+`Money\Exception\ParserException` rather than returning the part that did parse:
+
+```php
+MoneyFormatter::parseToMinor('12 dollars', Currency::fromCode('USD'), 'en_US'); // ParserException
+MoneyFormatter::parseToMinor('1.2.3', Currency::fromCode('USD'), 'en_US');      // ParserException
+MoneyFormatter::parseToMinor('0x1A', Currency::fromCode('USD'), 'en_US');       // ParserException
+MoneyFormatter::parseToMinor('NaN', Currency::fromCode('USD'), 'en_US');        // ParserException
 ```
 
 **Separators are forgiven**, since they are the most common way for user input to miss its locale. A string
@@ -620,15 +628,18 @@ a config key, a lenient form and a strict import can live in the same applicatio
 does not require a grouping separator, and does not insist on the exact space character the locale prefers
 between the digits — ICU accepts an ordinary space where `sv_SE` writes a non-breaking one, in both modes.
 
-An amount written with its currency is accepted in strict mode too, since that is what the locale writes —
-but only in the notation this configuration writes it in, and with the space the locale uses beside the
-symbol:
+An amount written with its currency is accepted in strict mode too, but only exactly as this
+configuration writes it: the notation `intl_currency_symbol` selects, where the locale puts it, with the
+space the locale uses. Every other placement, notation and space is forgiveness, so strict mode refuses
+it:
 
 ```php
 // with intl_currency_symbol = false, which is the default
 MoneyFormatter::parseToMinor('$1,234.56', Currency::fromCode('USD'), 'en_US', strict: true); // '123456'
+
 MoneyFormatter::parseToMinor('USD 12', Currency::fromCode('USD'), 'en_US', strict: true);    // ParserException
-MoneyFormatter::parseToMinor('USD 12', Currency::fromCode('USD'), 'en_US');                  // '1200'
+MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US', strict: true);    // ParserException
+MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US');                  // '1200'
 
 // sv_SE writes a non-breaking space before kr
 MoneyFormatter::parseToMinor('1 234,56 kr', Currency::fromCode('SEK'), 'sv_SE', strict: true); // ParserException
@@ -660,7 +671,7 @@ MoneyFormatter::parseToMinor('1.005', Currency::fromCode('USD'), 'en_US');      
 
 MoneyFormatter::parseToMinor('invalid', Currency::fromCode('USD'), 'en_US');
 // Money\Exception\ParserException: The value must be a valid numeric value.
-MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US');
+MoneyFormatter::parseToMinor('12 dollars', Currency::fromCode('USD'), 'en_US');
 // Money\Exception\ParserException: The value must be a valid numeric value.
 ```
 

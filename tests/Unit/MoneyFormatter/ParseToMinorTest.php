@@ -206,7 +206,8 @@ it('refuses a string that is not a number in its entirety', function (string $lo
     expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('USD'), $locale))
         ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
 })->with([
-    'trailing currency code'   => ['en_US', '12 USD'],
+    'trailing words'           => ['en_US', '12 dollars'],
+    'the currency twice'       => ['en_US', '12 USD USD'],
     'trailing letters'         => ['en_US', '12abc'],
     'leading letters'          => ['en_US', 'abc12'],
     'two decimal separators'   => ['en_US', '1.2.3'],
@@ -481,6 +482,10 @@ it('reads an amount written with its currency', function (string $locale, string
     'symbol, negative'                        => ['en_US', 'USD', '-$1,234.56', '-123456'],
     'symbol, no grouping'                     => ['en_US', 'USD', '$1234.56', '123456'],
     'code where the locale puts the currency' => ['en_US', 'USD', 'USD 12', '1200'],
+    'code where it does not'                  => ['en_US', 'USD', '12 USD', '1200'],
+    'code with no space'                      => ['en_US', 'USD', '12USD', '1200'],
+    'symbol where it does not'                => ['en_US', 'USD', '1,234.56$', '123456'],
+    'symbol behind a krona amount'            => ['sv_SE', 'SEK', 'kr 1 234,56', '123456'],
     'suffix symbol'                           => ['sv_SE', 'SEK', "1\u{a0}234,56\u{a0}kr", '123456'],
     'suffix, typed spaces'                    => ['sv_SE', 'SEK', '1 234,56 kr', '123456'],
 ]);
@@ -502,6 +507,7 @@ it('refuses the other notation and typed spaces in strict mode', function (strin
 })->with([
     'the code while the symbol is configured' => ['en_US', 'USD', 'USD 12'],
     'spaces a keyboard produced'              => ['sv_SE', 'SEK', '1 234,56 kr'],
+    'the currency behind the amount'          => ['en_US', 'USD', '12 USD'],
 ]);
 
 /*

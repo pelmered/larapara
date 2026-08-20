@@ -254,9 +254,11 @@ class MoneyFormatter
         }
 
         if ($parsed === false && ! $strict) {
+            $formattingRules = self::getFormattingRules($locale, $currency);
+
             // Separators are the most common way for user input to miss its locale, so give them a
             // second reading before giving up. See: https://github.com/pelmered/larapara/issues/20
-            $rewritten = self::rewriteSeparators($moneyString, self::getFormattingRules($locale, $currency));
+            $rewritten = self::rewriteSeparators($moneyString, $formattingRules);
 
             if ($rewritten !== $moneyString) {
                 $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
@@ -264,6 +266,26 @@ class MoneyFormatter
 
             if ($parsed === false) {
                 $parsed = self::parseCurrencyAmount($moneyString, $currency, $locale, $minorUnit, anyNotation: true);
+            }
+
+            if ($parsed === false) {
+                // The currency written where the locale does not put it. ICU reads a currency only
+                // where the formatter would have written it, and a person filling in a form is not a
+                // formatter: "12 USD" in a locale that writes "$12" has one reading and no other, so
+                // it is read like every other separator the locale itself would refuse.
+                $withoutCurrency = self::withoutCurrency($moneyString, $locale, $currency);
+
+                if ($withoutCurrency !== $moneyString) {
+                    $parsed = self::parseLocalizedNumber($numberFormatter, $withoutCurrency);
+
+                    if ($parsed === false) {
+                        $rewritten = self::rewriteSeparators($withoutCurrency, $formattingRules);
+
+                        if ($rewritten !== $withoutCurrency) {
+                            $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
+                        }
+                    }
+                }
             }
         }
 
@@ -532,6 +554,60 @@ class MoneyFormatter
         }
 
         return false;
+    }
+
+    /**
+     * The string without the currency beside it, wherever it was written.
+     *
+     * Only the currency being read, so "12 EUR" as USD stays a refusal rather than becoming twelve
+     * dollars, and only one occurrence of it, so "12 USD USD" is still not a number.
+     */
+    private static function withoutCurrency(string $value, string $locale, MoneyCurrency $currency): string
+    {
+        foreach (self::currencyNotations($locale, $currency) as $notation) {
+            if ($notation === '') {
+                continue;
+            }
+
+            foreach ([self::removePrefix($value, $notation), self::removeSuffix($value, $notation)] as $stripped) {
+                if ($stripped !== $value) {
+                    // Whatever stood between the two is the space of the locale, or the space of a
+                    // keyboard, and the separator rules below read either.
+                    return trim(str_replace(self::GROUPING_SEPARATOR_CLASSES[0], ' ', $stripped));
+                }
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * The ways the currency can be written beside an amount: its ISO code, and its symbol here.
+     *
+     * @return list<string>
+     */
+    private static function currencyNotations(string $locale, MoneyCurrency $currency): array
+    {
+        $code            = $currency->getCode();
+        $numberFormatter = self::currencyFormatter($locale, $code);
+
+        // ICU falls back to the currency of the locale's region for a code it does not know, whose
+        // symbol belongs to a different currency altogether.
+        $symbol = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $code
+            ? $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL)
+            : '';
+
+        return [$code, $symbol];
+    }
+
+    private static function removePrefix(string $value, string $prefix): string
+    {
+        return str_starts_with($value, $prefix) ? substr($value, strlen($prefix)) : $value;
+    }
+
+    private static function removeSuffix(string $value, string $suffix): string
+    {
+        return str_ends_with($value, $suffix) ? substr($value, 0, -strlen($suffix)) : $value;
     }
 
     /**

@@ -148,19 +148,25 @@ It also accepts an amount written with the symbol of that currency, where the lo
 what the formatter writes:
 
 ```php
-MoneyFormatter::parseToMinor('$1,234.56', $usd, 'en_US');  // '123456'  (was ParserException)
-MoneyFormatter::parseToMinor('USD 12', $usd, 'en_US');     // '1200'    (was ParserException)
-MoneyFormatter::parseToMinor('12 USD', $usd, 'en_US');     // ParserException, as before
-MoneyFormatter::parseToMinor('€10', $usd, 'en_US');        // ParserException — that is not this currency
+MoneyFormatter::parseToMinor('$1,234.56', $usd, 'en_US');       // '123456'  (was ParserException)
+MoneyFormatter::parseToMinor('12 USD', $usd, 'en_US');          // '1200'    (was ParserException)
+MoneyFormatter::parseToMinor('USD 12', $usd, 'en_US');          // '1200'    (was ParserException)
+MoneyFormatter::parseToMinor('€10', $usd, 'en_US');             // ParserException — not this currency
+MoneyFormatter::parseToMinor('12 EUR', $usd, 'en_US');          // ParserException — not this currency
+MoneyFormatter::parseToMinor('12 dollars', $usd, 'en_US');      // ParserException — not a currency
+MoneyFormatter::parseToMinor('12 USD USD', $usd, 'en_US');      // ParserException — written twice
 ```
 
-`'12 USD'` stays refused because `en_US` writes the currency in front, not behind; `'USD 12'` is now read
-for the same reason. A symbol belonging to another currency is refused rather than converted, which ICU's
-own currency parser would not do on its own.
+The currency has to be the one being read, written once, as its ISO code or its symbol. A symbol belonging
+to another currency is refused rather than converted, which ICU's own currency parser would do on its own.
 
-Strict mode accepts the notation this configuration writes — the symbol, or the ISO code when
-`intl_currency_symbol` is on — with the space the locale puts beside it. The other notation, and a space a
-keyboard produced instead of the one CLDR names, are forgiven only when strict mode is off.
+This does not bring back what the 1.\* parser did with `'12 USD'`. That was a *partial* read — ICU
+consumed `'12'` and dropped the rest, the same defect that turned `'0x1A'` into `0` — and the whole string
+still has to be accounted for. What is new is that a trailing or leading currency counts as accounted for.
+
+Strict mode accepts only what this configuration writes: the notation `intl_currency_symbol` selects,
+where the locale puts it, with the space the locale uses. Every other placement, notation and space is
+forgiveness, so strict mode refuses it.
 
 ## An amount in a currency outside ISO 4217 formats and parses
 
@@ -260,9 +266,11 @@ were passing a major-unit amount, multiply it by the minor unit first, or use `f
 
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
-- The whole string has to be a number in the given locale. `'12 USD'`, `'1.2.3'`, `'0x1A'` and `'NaN'` now
-  throw `ParserException`, as the documentation always said they would, rather than returning the part that
-  happened to parse.
+- The whole string has to be accounted for. `'1.2.3'`, `'0x1A'`, `'NaN'` and `'12 dollars'` now throw
+  `ParserException`, as the documentation always said they would, rather than returning the part that
+  happened to parse. The currency of the amount is accounted for: `'12 USD'` reads as 1200, but for a
+  different reason than it did in 1.\*, where the `' USD'` was simply ignored — see the section on that
+  above.
 - A dot that the locale itself refuses is now read as that locale's decimal separator, since a dot means a
   decimal point on nearly every keyboard, spreadsheet and programming language. In `de_DE`, `'1.5'` was
   `'1500'` (€15.00) and is now `'150'` (€1.50) — dropping the dot as grouping left no way to type a decimal

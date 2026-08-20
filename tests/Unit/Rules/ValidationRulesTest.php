@@ -40,6 +40,15 @@ function localizedAmount(mixed $value, string $locale, string $currency): mixed
 |--------------------------------------------------------------------------
 */
 
+// The currency of the field written beside the amount is read, wherever a person put it.
+it('passes an amount written with its own currency', function (string $value): void {
+    expect(validateValue($value, new MoneyString('USD', 'en_US'))->passes())->toBeTrue();
+})->with([
+    'symbol'        => ['$1,234.56'],
+    'trailing code' => ['12 USD'],
+    'leading code'  => ['USD 12'],
+]);
+
 it('passes an amount its locale can read', function (string $locale, string $currency, mixed $value): void {
     expect(validateValue(localizedAmount($value, $locale, $currency), new MoneyString($currency, $locale))->passes())->toBeTrue();
 })->with([
@@ -59,7 +68,8 @@ it('fails an amount no locale can read', function (mixed $value): void {
     expect(validateValue($value, new MoneyString('USD', 'en_US'))->passes())->toBeFalse();
 })->with([
     'a word'                 => ['nonsense'],
-    'trailing text'          => ['12 USD'],
+    'trailing text'          => ['12 dollars'],
+    'another currency'       => ['12 EUR'],
     'two decimal separators' => ['1.2.3'],
     'not finite'             => ['NaN'],
     'an array'               => [['1234']],
