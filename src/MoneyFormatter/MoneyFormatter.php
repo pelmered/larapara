@@ -140,11 +140,14 @@ class MoneyFormatter
         ?string $moneyString,
         Currency|MoneyCurrency $currency,
         string $locale,
-        int $decimals = 2
+        int $decimals = 2,
+        ?bool $strict = null,
     ): string {
         if (is_null($moneyString) || $moneyString === '') {
             return '';
         }
+
+        $strict ??= (bool) config('larapara.parse.strict', false);
 
         $currency    = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
         $moneyString = trim($moneyString);
@@ -152,7 +155,7 @@ class MoneyFormatter
         $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
-        if ($parsed === false) {
+        if ($parsed === false && ! $strict) {
             // Separators are the most common way for user input to miss its locale, so give them a
             // second reading before giving up. See: https://github.com/pelmered/larapara/issues/20
             $rewritten = self::rewriteSeparators($moneyString, self::getFormattingRules($locale, $currency));

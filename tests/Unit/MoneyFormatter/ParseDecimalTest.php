@@ -319,6 +319,65 @@ it('parses a Money currency as well as a LaraPara one', function (): void {
 
 /*
 |--------------------------------------------------------------------------
+| Strict mode
+|--------------------------------------------------------------------------
+|
+| Strict mode is the first reading only: what the locale itself writes, and
+| nothing the separator rules would have rescued.
+|
+*/
+
+it('refuses what the separator rules would have rescued when it is strict', function (string $locale, string $currency, string $template): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
+        ->toThrow(ParserException::class, 'The value must be a valid numeric value.');
+})->with([
+    'dropped grouping separator'  => ['en_US', 'USD', '2_00'],
+    'grouping out of position'    => ['en_US', 'USD', '12_34'],
+    'a dot in a dot locale'       => ['de_DE', 'EUR', '1.5'],
+    'a dot in a space locale'     => ['sv_SE', 'SEK', '1.5'],
+    'a dot in a narrow space one' => ['fr_FR', 'EUR', '1.5'],
+]);
+
+it('accepts what the locale itself writes when it is strict', function (string $locale, string $currency, string $template, string $expectedOutput): void {
+    expect(MoneyFormatter::parseDecimal(localizedNumber($template, $locale, $currency), Currency::fromCode($currency), $locale, strict: true))
+        ->toBe($expectedOutput);
+})->with([
+    'us number'              => ['en_US', 'USD', '1_234~56', '123456'],
+    'us number, no grouping' => ['en_US', 'USD', '1234~56', '123456'],
+    'german number'          => ['de_DE', 'EUR', '1_234~56', '123456'],
+    'german, no grouping'    => ['de_DE', 'EUR', '1234~56', '123456'],
+    'swedish number'         => ['sv_SE', 'SEK', '1_234~56', '123456'],
+    'whole units'            => ['en_US', 'USD', '100', '10000'],
+    'negative'               => ['en_US', 'USD', '-1_234~56', '-123456'],
+]);
+
+it('takes strictness from the config when it is not given', function (): void {
+    config(['larapara.parse.strict' => true]);
+
+    expect(fn (): string => MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))
+        ->toThrow(ParserException::class);
+
+    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US', strict: false))->toBe('20000');
+});
+
+it('is lenient when the config does not mention strictness at all', function (): void {
+    config(['larapara.parse' => null]);
+
+    expect(MoneyFormatter::parseDecimal('2,00', Currency::fromCode('USD'), 'en_US'))->toBe('20000');
+});
+
+it('refuses an amount that is not a number in either mode', function (bool $strict): void {
+    expect(fn (): string => MoneyFormatter::parseDecimal('nonsense', Currency::fromCode('USD'), 'en_US', strict: $strict))
+        ->toThrow(ParserException::class);
+})->with([true, false]);
+
+it('parses an empty value the same way in either mode', function (bool $strict): void {
+    expect(MoneyFormatter::parseDecimal('', Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('')
+        ->and(MoneyFormatter::parseDecimal(null, Currency::fromCode('USD'), 'en_US', strict: $strict))->toBe('');
+})->with([true, false]);
+
+/*
+|--------------------------------------------------------------------------
 | Separators people actually type
 |--------------------------------------------------------------------------
 |
