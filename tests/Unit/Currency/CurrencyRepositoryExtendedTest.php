@@ -76,7 +76,9 @@ it('respects currency exclusion configuration', function (): void {
     $currencies = CurrencyRepository::getAvailableCurrencies();
     $codes      = $currencies->pluck('code')->toArray();
 
-    expect($codes)->not->toContain('USD', 'EUR');
+    expect($codes)->not->toContain('USD');
+    expect($codes)->not->toContain('EUR');
+    expect($codes)->toContain('SEK');
 
     // Reset config
     config(['larapara.available_currencies' => $originalAvailable]);

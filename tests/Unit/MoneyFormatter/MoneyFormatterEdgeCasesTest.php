@@ -2,7 +2,6 @@
 
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
-use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 beforeEach(function (): void {
@@ -80,14 +79,7 @@ it('formats different currencies with appropriate precision', function (): void 
     expect($result)->toContain('.');
 });
 
-it('respects custom formatter rules', function (): void {
-    $rules = new CurrencyFormattingRules(
-        currencySymbol: 'USD',
-        fractionDigits: 4,
-        decimalSeparator: '.',
-        groupingSeparator: ','
-    );
-
+it('lets the decimals argument override the fraction digits of the currency', function (): void {
     expect(MoneyFormatter::format(12345, Currency::fromCode('USD'), 'en_US', decimals: 4))
         ->toEqual('$123.4500');
 });
