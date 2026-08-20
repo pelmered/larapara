@@ -284,3 +284,4 @@ it('stores a large amount exactly', function (): void {
 
     expect($model->getAttributes()['price'])->toBe('922337203685477.58');
 });
+});
