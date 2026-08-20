@@ -143,8 +143,8 @@ class CurrencyRepository
                     return [
                         $currencyCode => new Currency(
                             $currencyCode,
-                            $currencies[$currencyCode]['currency'] ?? '',
-                            $currencies[$currencyCode]['minorUnit'],
+                            $currencies[$currencyCode]['currency']  ?? '',
+                            $currencies[$currencyCode]['minorUnit'] ?? null,
                         ),
                     ];
                 }
