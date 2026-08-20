@@ -39,11 +39,43 @@ which is the default, was never affected.
   set" and "free" were indistinguishable. If you have rows that were meant to be null, they are zeros in
   the column now and only you can tell which is which.
 
+## The currency cache keeps the TTL it is configured with
+
+The TTL was passed to the cache in whatever shape the config or the environment produced it in, and
+neither shape failed loudly when it was the wrong one for the type. `MONEY_CURRENCY_CACHE_TTL=3600` with
+the default `flexible` type was read one character at a time, so the entry lived 6 seconds instead of an
+hour, and `MONEY_CURRENCY_CACHE=remember` with the shipped array default cached for 1 second. Both are
+coerced to the shape the type takes now, so a cache that appeared to do nothing starts working — if you
+tuned anything around the old behaviour, check the TTL you have configured.
+
+`money:clear` also forgets the companion key the `flexible` type stores the age of the entry under, and
+`money:cache` says so when the cache is disabled instead of reporting currencies it did not write.
+
+## Crypto currencies have a name
+
+Every currency from `CryptoCurrenciesProvider` had an empty name, so `toSelectArray()` rendered
+`BTC - `. The code stands in for the name it does not have, giving `BTC - BTC`.
+
+## `intl_currency_symbol` applies to every currency style
+
+It was applied to `NumberFormatter::CURRENCY` and `CURRENCY_ACCOUNTING` only, and silently dropped for
+the other ICU currency styles — the cash and standard variants, which have no PHP constants — even
+though their patterns carry the same currency placeholder. Any style whose pattern has one now honours
+the setting.
+
+## The `larapara-translations` publish tag is gone
+
+The package registered translations without shipping any, so `vendor:publish --tag=larapara-translations`
+published nothing. Nothing consumed it, and `trans('larapara::...')` returned the key either way.
+
 ## Currency codes are validated as they are written
 
 `CurrencyCast::set()` and `MoneyCast::set()` now normalize the code (trimmed, upper-cased) and refuse a
 code that `available_currencies` does not list, throwing `UnsupportedCurrency`. Reading such a row already
 threw the same exception, so this moves the failure to the write that causes it.
+
+Reading a money attribute whose currency column is empty throws `UnsupportedCurrency` as well, instead of
+building a `Money` with an empty currency that only fails further downstream.
 
 If your application writes a currency it does not list — a crypto code without
 `load_crypto_currencies`, say — add it to `available_currencies`.
@@ -108,7 +140,7 @@ and now returns `'12.3'`. The documented cases are unchanged.
 
 # Upgrade from 1.* to 2.*
 
-### Add Model cats for money fields (optional but strongly recommended)
+### Add model casts for money fields (optional but strongly recommended)
 
 _-As of now, this is required, will be made optional in the future.-_
 
@@ -152,7 +184,7 @@ protected function priceCurrency(): Attribute
         get: static fn (string $value) => $value,
     );
 }
-````
+```
 
 ### Add currency columns
 
@@ -161,14 +193,21 @@ Each money column needs a corresponding currency column with the name {money_col
 For new columns
 ```php
 Schema::table('tablename', function (Blueprint $table) {
-    $table->money('price'); // This will create two columns, 'price' (integer) and 'price_currency' (char(3))
+    $table->money('price'); // This will create two columns, 'price' (integer) and 'price_currency' (varchar(6))
 });
 ```
-For changing existing columns, in this case a column called `price`.
+For an existing amount column, in this case a column called `price`, add the currency column as nullable,
+backfill the rows you already have, and only then make it required:
 ```php
 Schema::table('tablename', function (Blueprint $table) {
-    $table->char('price_currency', 3)->after('price')->change();
-    $this->index(['price', 'price_currency']);
+    $table->string('price_currency', 6)->nullable()->after('price');
+});
+
+DB::table('tablename')->whereNull('price_currency')->update(['price_currency' => 'USD']);
+
+Schema::table('tablename', function (Blueprint $table) {
+    $table->string('price_currency', 6)->nullable(false)->change();
+    $table->index(['price_currency', 'price']);
 });
 ```
 Don't forget to run your migrations. 
@@ -207,6 +246,5 @@ MONEY_AVAILABLE_CURRENCIES=USD,EUR,GBP
 ```php
 MoneyFormatter::formatAsDecimal(123456, Currency::fromCode('USD')); // Output: $1,234.56
 // should be changed to:
-MoneyFormatter::numberFormat(123456); // Output: $1,234.56
-
-``
+MoneyFormatter::numberFormat(123456, 'en_US'); // Output: 1,234.56
+```

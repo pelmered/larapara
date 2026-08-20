@@ -64,7 +64,7 @@ return [
     |---------------------------------------------------------------------------
     |
     | Provide your own custom currency list provider.
-    | It must implement the Money\Currencies interface
+    | It must implement the Pelmered\LaraPara\Currencies\Providers\CurrenciesProvider interface
     |
     */
     'currency_provider' => ISOCurrenciesProvider::class,
@@ -79,6 +79,7 @@ return [
     | For example: ['USD', 'EUR']
     | If you want to include all currencies, leave this as an empty array.
     | If you include all with an empty array, you may exclude currencies with 'excluded_currencies'.
+    | 'excluded_currencies' does not have any effect when 'available_currencies' is set.
     | TIP: In your .env file, you can set MONEY_AVAILABLE_CURRENCIES as a comma-separated string like this:
     | MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
     |
@@ -103,7 +104,7 @@ return [
     | Caching
     |---------------------------------------------------------------------------
     |
-    | Set to false to disable the currency cache.
+    | Set `type` to false to disable the currency cache.
     |
     */
     'currency_cache' => [

@@ -24,7 +24,7 @@ writes an amount.
 [![Crap](https://img.shields.io/endpoint?url=https://otterwise.app/badge/github/pelmered/larapara/crap/25ef865e-5235-4775-a357-246bef38293c)](https://otterwise.app/github/pelmered/larapara)
 [![PHPStan](https://img.shields.io/badge/PHPStan-level%208-brightgreen.svg?style=flat)](https://otterwise.app/github/pelmered/larapara)
 
-[![Tested with Laravel 11 to 12](https://img.shields.io/badge/Tested%20with%20Laravel-11%20%7C%2012-brightgreen?maxAge=2419200)](https://github.com/pelmered/larapara/actions/workflows/tests.yml)
+[![Tested with Laravel 11 to 13](https://img.shields.io/badge/Tested%20with%20Laravel-11%20%7C%2012%20%7C%2013-brightgreen?maxAge=2419200)](https://github.com/pelmered/larapara/actions/workflows/tests.yml)
 [![Tested on PHP 8.2 to 8.4](https://img.shields.io/badge/Tested%20on%20PHP-8.2%20|%208.3%20|%208.4-brightgreen.svg?maxAge=2419200)](https://github.com/pelmered/larapara/actions/workflows/tests.yml)
 [![Tested on OS:es Linux, MacOS, Windows](https://img.shields.io/badge/Tested%20on%20lastest%20versions%20of-%20Ubuntu%20|%20MacOS%20|%20Windows-brightgreen.svg?maxAge=2419200)](https://github.com/pelmered/larapara/actions/workflows/tests.yml)
 
@@ -67,7 +67,7 @@ considered stable API and will not change without a major version bump.
 ## Requirements
 
 - PHP 8.2 or higher
-- Laravel 11.24 or higher
+- Laravel 11.28 or higher
 - [PHP Internationalization extension (intl)](https://www.php.net/manual/en/intro.intl.php), which is
   built on [ICU](https://icu.unicode.org/) — see [Where the formatting comes from](#where-the-formatting-comes-from)
 - A database column for the amount (integer for minor units, or decimal) plus a column for the currency
@@ -106,7 +106,7 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
 | `currency_column_suffix`  | `MONEY_CURRENCY_COLUMN_SUFFIX`  | `_currency`              | Suffix for the currency column belonging to an amount column.                                      |
 | `currency_cache.type`     | `MONEY_CURRENCY_CACHE`          | `flexible`               | `remember`, `flexible`, `forever` or `false` to disable.                                           |
-| `currency_cache.ttl`      | `MONEY_CURRENCY_CACHE_TTL`      | `[2592000, 31556926]`    | Cache TTL in seconds. `flexible` takes a `[fresh, expires]` pair — the value is served stale between the two — so set it in the config file rather than `.env`. |
+| `currency_cache.ttl`      | `MONEY_CURRENCY_CACHE_TTL`      | `[2592000, 31556926]`    | Cache TTL in seconds. `flexible` takes a `[fresh, expires]` pair — the value is served stale between the two — which needs the config file; a single number from `.env` is used for both. |
 | `load_crypto_currencies`  | `MONEY_LOAD_CRYPTO_CURRENCIES`  | `false`                  | Add crypto currencies to the currency list.                                                        |
 | `currency_cast_to`        | `MONEY_CURRENCY_CAST`           | `LaraPara\...\Currency`  | What `CurrencyCast` returns: LaraPara's `Currency` (recommended) or `Money\Currency`.               |
 
@@ -810,9 +810,8 @@ php artisan money:cache    # Build the currency cache (add -v to list the cached
 php artisan money:clear    # Clear it
 ```
 
-On Laravel 11.27.1 and higher they are also wired into Laravel's optimization commands, so
-`php artisan optimize` and `php artisan optimize:clear` take care of the currency cache as well. On earlier
-versions, run `money:cache` and `money:clear` yourself.
+They are also wired into Laravel's optimization commands, so `php artisan optimize` and
+`php artisan optimize:clear` take care of the currency cache as well.
 
 Set `MONEY_CURRENCY_CACHE=false` to disable caching, for example while developing a custom provider.
 
