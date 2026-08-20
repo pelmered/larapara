@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Pelmered\LaraPara\Currencies\CurrencyRepository;
@@ -45,7 +44,9 @@ it('clears the companion key the flexible type writes', function (): void {
 
     CurrencyRepository::getAvailableCurrencies();
 
-    $createdKey = Repository::FLEXIBLE_CREATED_KEY_PREFIX.CurrencyRepository::CACHE_KEY;
+    // The framework's own key, spelled out rather than read from it: it is a constant only from
+    // Laravel 13, and if the string ever changes this test is where it should be noticed.
+    $createdKey = 'illuminate:cache:flexible:created:'.CurrencyRepository::CACHE_KEY;
 
     expect(Cache::has(CurrencyRepository::CACHE_KEY))->toBeTrue()
         ->and(Cache::has($createdKey))->toBeTrue();

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Pelmered\LaraPara\Currencies;
 
-use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -18,6 +17,15 @@ use PhpStaticAnalysis\Attributes\Throws;
 class CurrencyRepository
 {
     public const CACHE_KEY = 'larapara_currencies';
+
+    /**
+     * Key the flexible cache keeps the age of an entry under.
+     *
+     * Illuminate\Cache\Repository writes this key itself and names it in a constant, but only from
+     * Laravel 13; the two lines before that spell the same string inline, so the string is what works
+     * across the range this package supports.
+     */
+    public const FLEXIBLE_CREATED_KEY_PREFIX = 'illuminate:cache:flexible:created:';
 
     public static function isValid(Currency $currency): bool
     {
@@ -63,7 +71,7 @@ class CurrencyRepository
         Cache::forget(static::CACHE_KEY);
 
         // The flexible type keeps the age of the entry under a companion key of its own.
-        Cache::forget(Repository::FLEXIBLE_CREATED_KEY_PREFIX.static::CACHE_KEY);
+        Cache::forget(static::FLEXIBLE_CREATED_KEY_PREFIX.static::CACHE_KEY);
     }
 
     /**

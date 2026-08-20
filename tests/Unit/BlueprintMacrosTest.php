@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\MySqlGrammar;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
@@ -11,13 +12,43 @@ use Illuminate\Support\Fluent;
 /**
  * Laravel 12 moved the connection into the Blueprint constructor's first argument.
  */
-function newBlueprint(string $table): Blueprint
+function newBlueprint(string $table, ?Connection $connection = null): Blueprint
 {
     $firstParameter = (new ReflectionMethod(Blueprint::class, '__construct'))->getParameters()[0];
 
     return $firstParameter->getName() === 'connection'
-        ? new Blueprint(DB::connection(), $table)
+        ? new Blueprint($connection ?? DB::connection(), $table)
         : new Blueprint($table);
+}
+
+/**
+ * The SQL a macro compiles to under a given grammar.
+ *
+ * Laravel 12 moved the grammar from an argument of toSql() to a property of the connection, and made
+ * the grammars take that connection, so both shapes are built here rather than in every expectation.
+ */
+function compileMacro(string $macro, string $grammarClass): string
+{
+    $connection = clone DB::connection();
+    $grammar    = (new ReflectionClass($grammarClass))->getConstructor()?->getNumberOfParameters() > 0
+        ? new $grammarClass($connection)
+        : new $grammarClass;
+
+    if ((new ReflectionMethod(Blueprint::class, 'toSql'))->getNumberOfParameters() > 0) {
+        $blueprint = newBlueprint('test_table');
+        $blueprint->create();
+        $blueprint->{$macro}('price');
+
+        return implode(' | ', $blueprint->toSql($connection, $grammar));
+    }
+
+    $connection->setSchemaGrammar($grammar);
+
+    $blueprint = newBlueprint('test_table', $connection);
+    $blueprint->create();
+    $blueprint->{$macro}('price');
+
+    return implode(' | ', $blueprint->toSql());
 }
 
 /**
@@ -172,21 +203,8 @@ it('returns a column the caller can keep building on', function (): void {
 it('compiles through the MySQL and Postgres grammars', function (string $macro, string $format, string $mysql, string $postgres): void {
     config(['larapara.store.format' => $format]);
 
-    $statements = static function (string $grammarClass) use ($macro): string {
-        // The blueprint compiles with the grammar of its connection, so the connection is copied and
-        // given the grammar under test rather than the SQLite one the suite runs on.
-        $connection = clone DB::connection();
-        $connection->setSchemaGrammar(new $grammarClass($connection));
-
-        $blueprint = new Blueprint($connection, 'test_table');
-        $blueprint->create();
-        $blueprint->{$macro}('price');
-
-        return implode(' | ', $blueprint->toSql());
-    };
-
-    expect($statements(MySqlGrammar::class))->toContain($mysql)
-        ->and($statements(PostgresGrammar::class))->toContain($postgres);
+    expect(compileMacro($macro, MySqlGrammar::class))->toContain($mysql)
+        ->and(compileMacro($macro, PostgresGrammar::class))->toContain($postgres);
 })->with([
     'money, int' => [
         'money', 'int',
