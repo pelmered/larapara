@@ -257,8 +257,9 @@ class MoneyFormatter
     /**
      * Reads a localized amount string into the minor units of a currency: "1,234.56" in USD is 123456.
      *
-     * A numeric string rather than an int, since that is what a Money holds and what the casts store,
-     * and it carries an amount past the range an int keeps losslessly.
+     * A numeric string rather than an int, since that is what a Money holds and what the casts store.
+     * The string is read through a double on the way, so an amount above 2**53 minor units is exact
+     * only to the precision a double has.
      */
     #[Returns("numeric-string|''")]
     public static function parseToMinor(
