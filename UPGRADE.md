@@ -63,6 +63,98 @@ the other ICU currency styles — the cash and standard variants, which have no 
 though their patterns carry the same currency placeholder. Any style whose pattern has one now honours
 the setting.
 
+## Amounts are formatted with the fraction digits of their currency
+
+`format()`, `formatMoney()` and `formatShort()` took two decimals for every currency and now take the
+minor unit of the currency, which changes the output for 39 of the 179 bundled currencies: `¥1,000.00`
+is `¥1,000`, and `BHD 1,234.57` for 1234567 fils is `BHD 1,234.567`. Pass `decimals:` to get the old
+number back for a specific call. `parseDecimal()` already scaled by the currency, so formatting and
+parsing now agree in both directions.
+
+`getFormattingRules()->fractionDigits` reports the minor unit of the currency it is given rather than
+ICU's, which is 2 for anything outside ISO 4217 — a crypto currency with eight minor units said two.
+
+The abbreviated part of `formatShort()` still carries two decimals whatever the currency, since ¥1.23M
+says three digits that ¥1M would lose. Below the abbreviation threshold the currency decides.
+
+## `parseDecimal()` no longer takes `$decimals`
+
+The parameter never did anything: a number formatter reads every decimal a string carries whatever its
+fraction digits are set to, so the scale always came from the currency. Calls that passed it positionally
+have to drop it — `parseDecimal($value, $currency, $locale, $decimals, $strict)` becomes
+`parseDecimal($value, $currency, $locale, $strict)`.
+
+## `numberFormat()` is told what its value counts
+
+`int 123456` was `1,234.56` while `'123456'` was `123,456.00` — the same amount a hundred times apart,
+decided by the PHP type. Since `Money::getAmount()` returns a numeric string and a form field arrives as
+one, the natural call was the wrong one. A `minorUnits` argument now decides, defaulting to the new
+`number_format.minor_units` config key, which ships as `true`:
+
+```php
+MoneyFormatter::numberFormat('123456', 'en_US');                   // 1,234.56  (was 123,456.00)
+MoneyFormatter::numberFormat(1234.56, 'en_US');                    // 12.35     (was 1,234.56)
+MoneyFormatter::numberFormat(1234.56, 'en_US', minorUnits: false); // 1,234.56
+```
+
+Set `number_format.minor_units` to `false` in the config if the method is used for plain numbers rather
+than amounts in your application, or pass `minorUnits:` per call. `$minorDecimals` is only consulted
+when the value counts minor units.
+
+## The currency column is never nullable
+
+All four column macros write the currency column as `NOT NULL`, defaulting to `default_currency`, where
+only `money()` did before. An amount without a unit means nothing, and a row whose amount is `null` still
+records the unit it would have been in, so assigning `null` to a currency attribute stores the default
+currency instead of `NULL`. `CurrencyCast::get()` still reads an existing `NULL` as `null`.
+
+Existing tables need the column widened and made required, in a migration of your own:
+
+```php
+Schema::table('products', function (Blueprint $table) {
+    $table->string('price_currency', 12)->nullable()->change();
+});
+
+DB::table('products')->whereNull('price_currency')->update(['price_currency' => 'USD']);
+
+Schema::table('products', function (Blueprint $table) {
+    $table->string('price_currency', 12)->nullable(false)->default('USD')->change();
+});
+```
+
+The width is `12` rather than `6` because a currency provider may bring codes longer than an ISO one: the
+bundled crypto list has `1000SATS` and `AUCTION`, which six characters truncate on a permissive database
+and reject on a strict one.
+
+Two macros also changed the signedness of the amount column, which differed between the storage formats
+for the same macro: `nullableMoney()` is signed in integer storage as well now (it was
+`unsignedBigInteger`), and `smallMoney()` is unsigned in decimal storage as well (it was signed). A macro
+is unsigned only where its name says so, and nullable only where its name says so.
+
+## Decimal storage refuses an amount it would round
+
+`store.format = decimal` keeps `store.decimal_scale` decimals — 3 by default, as before, now a config key
+and a `scale` argument on each macro. An amount whose minor units the scale cannot represent throws
+`Pelmered\LaraPara\Exceptions\InvalidAmount` instead of being rounded away by the database: CLF and UYW
+carry four minor units, and every crypto currency carries eight. Raise the scale in the config and in the
+column, pass `scale:` to the macro, or store amounts as integer minor units.
+
+`MoneyCast::set()` also writes the decimal by placing the point rather than by dividing, so the value
+reaching the column is a numeric string instead of a float and an amount larger than a double holds
+exactly is no longer deformed.
+
+## A currency serializes as its code
+
+`Currency` implements `JsonSerializable`, and `CurrencyCast` implements `serialize()`, so a model's array
+and JSON forms carry the code where they used to carry an object:
+
+```json
+{"price":{"amount":"123456","currency":"USD"},"price_currency":"USD"}
+```
+
+Before, `price_currency` was `{"code":"USD","name":"US Dollar","minorUnit":2}`. Anything reading
+`price_currency.name` from a payload needs `Currency::fromCode($code)->name` instead.
+
 ## Currency codes are validated as they are written
 
 `CurrencyCast::set()` and `MoneyCast::set()` now normalize the code (trimmed, upper-cased) and refuse a

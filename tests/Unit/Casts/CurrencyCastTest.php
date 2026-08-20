@@ -32,36 +32,38 @@ it('casts to money currency when configured', function (): void {
         ->and($model->price_currency->getCode())->toBe('EUR');
 });
 
-it('handles null values', function (): void {
+// The currency column is not nullable, so a null code is the configured default: a row with no
+// amount still records the unit it would have been in.
+it('writes the default currency for a null', function (): void {
     $model                 = new Post;
     $model->price_currency = null;
 
-    expect($model->getAttributes()['price_currency'])->toBeNull()
-        ->and($model->price_currency)->toBeNull();
+    expect($model->getAttributes()['price_currency'])->toBe('USD')
+        ->and($model->price_currency)->toBeInstanceOf(Currency::class)
+        ->and($model->price_currency->getCode())->toBe('USD');
 });
 
-// MoneyCast::set() writes the currency column alongside the amount, so which of the two is assigned
-// last decides what the column holds. Pinned here rather than left to the order a factory defines.
-it('writes the default currency with a null amount assigned after a null currency', function (): void {
-    $model                 = new Post;
-    $model->price_currency = null;
-    $model->price          = null;
+// MoneyCast::set() writes the currency column alongside the amount, so the two used to disagree
+// about a null depending on which was assigned last.
+it('writes the default currency whichever of the pair is assigned last', function (): void {
+    $currencyFirst                 = new Post;
+    $currencyFirst->price_currency = null;
+    $currencyFirst->price          = null;
 
-    expect($model->getAttributes())->toMatchArray([
-        'price'          => null,
-        'price_currency' => 'USD',
-    ]);
+    $amountFirst                 = new Post;
+    $amountFirst->price          = null;
+    $amountFirst->price_currency = null;
+
+    expect($currencyFirst->getAttributes())->toMatchArray(['price' => null, 'price_currency' => 'USD'])
+        ->and($amountFirst->getAttributes())->toMatchArray(['price' => null, 'price_currency' => 'USD']);
 });
 
-it('keeps a null currency when the amount is assigned first', function (): void {
-    $model                 = new Post;
-    $model->price          = null;
-    $model->price_currency = null;
+// A row written before the column was made non-nullable still reads back.
+it('reads a null column as null', function (): void {
+    $model = (new Post)->newFromBuilder(['price' => null, 'price_currency' => null]);
 
-    expect($model->getAttributes())->toMatchArray([
-        'price'          => null,
-        'price_currency' => null,
-    ]);
+    expect($model->price_currency)->toBeNull()
+        ->and($model->price)->toBeNull();
 });
 
 it('sets currency from currency instance', function (): void {
@@ -117,4 +119,14 @@ it('casts a currency it knows when hydrating', function (): void {
     expect($model->price_currency)
         ->toBeInstanceOf(Currency::class)
         ->getCode()->toBe('SEK');
+});
+
+// A model with these casts serializes its currency as a value, the way the Money beside it does,
+// rather than as a dump of the registry's record for that code.
+it('serializes a currency as its code', function (): void {
+    $model = (new Post)->newFromBuilder(['price' => 123456, 'price_currency' => 'SEK']);
+
+    expect($model->toArray()['price_currency'])->toBe('SEK')
+        ->and(json_decode($model->toJson(), true)['price_currency'])->toBe('SEK')
+        ->and(json_encode($model->price_currency))->toBe('"SEK"');
 });

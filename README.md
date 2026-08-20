@@ -98,9 +98,11 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | Config key                | Env variable                    | Default                  | Description                                                                                       |
 |---------------------------|---------------------------------|--------------------------|---------------------------------------------------------------------------------------------------|
 | `store.format`            | –                               | `int`                    | How amounts are stored: `int` (minor units, i.e. cents) or `decimal`.                             |
+| `store.decimal_scale`     | –                               | `3`                      | Decimals a decimal column keeps. An amount carrying more is refused rather than rounded away.      |
 | `default_currency`        | `MONEY_DEFAULT_CURRENCY`        | `USD`                    | Currency used when nothing else is set.                                                            |
 | `intl_currency_symbol`    | `MONEY_INTL_CURRENCY_SYMBOL`    | `false`                  | Use ISO 4217 codes (`USD`, `EUR`, `SEK`) instead of symbols (`$`, `€`, `kr`).                      |
 | `parse.strict`            | `MONEY_PARSE_STRICT`            | `false`                  | Accept only what the locale itself writes when parsing. See [strict mode](#strict-mode).           |
+| `number_format.minor_units` | `MONEY_NUMBER_FORMAT_MINOR_UNITS` | `true`             | Whether `numberFormat()` reads its value as minor units. See [`numberFormat`](#numberformat).       |
 | `currency_provider`       | –                               | `ISOCurrenciesProvider`  | Class that provides the currency list. See [custom currency lists](#custom-currency-lists).        |
 | `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of ISO codes. Comma separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `UnsupportedCurrency`. |
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
@@ -139,33 +141,50 @@ Available macros, and what they create for the amount column:
 | Macro                     | With `store.format = int`          | With `store.format = decimal`  |
 |---------------------------|------------------------------------|--------------------------------|
 | `money()`                 | `bigInteger`                       | `decimal(12, 3)`               |
-| `nullableMoney()`         | `unsignedBigInteger` (nullable)    | `decimal(12, 3)` (nullable)    |
-| `smallMoney()`            | `unsignedSmallInteger` (nullable)  | `decimal(6, 3)` (nullable)     |
+| `nullableMoney()`         | `bigInteger` (nullable)            | `decimal(12, 3)` (nullable)    |
+| `smallMoney()`            | `unsignedSmallInteger` (nullable)  | `decimal(6, 3)` (unsigned, nullable) |
 | `unsignedMoney()`         | `unsignedBigInteger`               | `decimal(12, 3)` (unsigned)    |
 
-All of them also create the currency column as `string(6)` — nullable for every macro except `money()` —
-and a composite index over `[price_currency, price]`. Pass a second argument to name that index:
+A macro is unsigned only where its name says so, and nullable only where its name says so, in both
+storage formats.
+
+All of them also create the currency column as `string(12)`, `NOT NULL`, defaulting to
+`default_currency`, plus a composite index over `[price_currency, price]`. The currency column is never
+nullable: an amount without a unit means nothing, and a row whose amount is `null` still records the
+unit it would have been in — assigning `null` to a currency attribute stores the default currency. The
+column is wider than an ISO code because a currency provider may bring longer ones; the bundled crypto
+list has `1000SATS` and `AUCTION`.
+
+Pass a second argument to name the index, and a third to set the scale of a decimal column:
 
 ```php
 $table->money('price', 'products_price_index');
+$table->money('price', scale: 8);              // for currencies with more than three minor units
 ```
 
-The decimal variants use a scale of 3, which covers every ISO currency with up to three minor units. Use
-integer storage for anything with more precision than that — CLF has four minor units, and the crypto
-currencies have eight.
+Each macro returns the amount column, so the chain lands where it reads as landing:
+
+```php
+$table->money('price')->nullable()->default(0);   // the amount column, not the currency column
+```
+
+The decimal scale defaults to `store.decimal_scale` (3), which covers every ISO currency except CLF and
+UYW; crypto currencies carry eight. `MoneyCast` refuses an amount whose minor units the scale cannot
+represent rather than letting the database round it away, so raise the scale — in the config and in the
+column — or store amounts as integer minor units.
 
 To add a currency column to an existing amount column, add it as nullable, backfill the rows you already
 have, and only then make it required:
 
 ```php
 Schema::table('products', function (Blueprint $table) {
-    $table->string('price_currency', 6)->nullable()->after('price');
+    $table->string('price_currency', 12)->nullable()->after('price');
 });
 
 DB::table('products')->whereNull('price_currency')->update(['price_currency' => 'USD']);
 
 Schema::table('products', function (Blueprint $table) {
-    $table->string('price_currency', 6)->nullable(false)->change();
+    $table->string('price_currency', 12)->nullable(false)->default('USD')->change();
     $table->index(['price_currency', 'price']);
 });
 ```
@@ -316,14 +335,14 @@ public static function formatMoney(
     Money $money,
     string $locale,
     int $outputStyle = NumberFormatter::CURRENCY,
-    int $decimals = 2,
+    ?int $decimals = null,
 ): string
 ```
 
 - `$money`: the `Money` object to format.
 - `$locale`: locale string, e.g. `en_US`, `sv_SE`.
 - `$outputStyle`: a [`NumberFormatter` style constant](https://www.php.net/manual/en/class.numberformatter.php#intl.numberformatter-constants).
-- `$decimals`: decimals, or significant digits when negative.
+- `$decimals`: decimals, or significant digits when negative. Defaults to the minor unit of the currency.
 
 ```php
 use Money\Currency;
@@ -332,6 +351,7 @@ use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 MoneyFormatter::formatMoney(new Money(123456, new Currency('USD')), 'en_US'); // $1,234.56
 MoneyFormatter::formatMoney(new Money(123456, new Currency('SEK')), 'sv_SE'); // 1 234,56 kr
+MoneyFormatter::formatMoney(new Money(123456, new Currency('JPY')), 'en_US'); // ¥123,456
 ```
 
 ### `format`
@@ -344,7 +364,7 @@ public static function format(
     Currency|MoneyCurrency $currency,
     string $locale,
     int $outputStyle = NumberFormatter::CURRENCY,
-    int $decimals = 2,
+    ?int $decimals = null,
     bool $showCurrencySymbol = true,
 ): string
 ```
@@ -353,6 +373,8 @@ public static function format(
   An amount that is not whole minor units — `'199.99'`, `'1,234'`, `'not a number'` — throws
   `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than being truncated to a wrong amount.
 - `$currency`: a LaraPara `Currency` or a `Money\Currency`. Ignored when `$value` is a `Money` object.
+- `$decimals`: decimals, or significant digits when negative. Defaults to the minor unit of the currency,
+  so ¥ amounts carry no decimals and BHD amounts carry three.
 - `$showCurrencySymbol`: set to `false` to get the amount only, placed by the minor unit of the currency.
 
 ```php
@@ -363,6 +385,9 @@ MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US'); // $1,234.56
 MoneyFormatter::format(123456, Currency::fromCode('SEK'), 'sv_SE'); // 1 234,56 kr
 
 MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1,234.56
+
+MoneyFormatter::format(12345, Currency::fromCode('JPY'), 'en_US');  // ¥12,345    (no minor unit)
+MoneyFormatter::format(12345, Currency::fromCode('BHD'), 'en_US');  // BHD 12.345 (three)
 
 MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 0);  // $1,235
 MoneyFormatter::format(123456, Currency::fromCode('USD'), 'en_US', decimals: 2);  // $1,234.56
@@ -382,28 +407,42 @@ public static function numberFormat(
     string $locale,
     int $decimals = 2,
     int $minorDecimals = 2,
+    ?bool $minorUnits = null,
 ): string
 ```
 
 - `$value`: the value to format. Non-numeric input returns an empty string.
 - `$decimals`: decimals, or significant digits when negative.
-- `$minorDecimals`: how many minor unit decimals an integer value carries. Only used for integers.
+- `$minorDecimals`: how many minor unit decimals the value carries. Only used when `$minorUnits` is true.
+- `$minorUnits`: whether the value counts minor units, defaulting to `number_format.minor_units` (`true`).
+
+The unit of the value is what the call says it is, not what its PHP type suggests: `123456` and
+`'123456'` are the same amount, and `Money::getAmount()` returns a string. Set
+`number_format.minor_units` to `false` where the method formats plain numbers rather than amounts, or
+pass `minorUnits:` per call.
 
 ```php
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
-MoneyFormatter::numberFormat(1234.56, 'en_US');        // 1,234.56
-MoneyFormatter::numberFormat('1234.56', 'en_US');      // 1,234.56
-MoneyFormatter::numberFormat(123456, 'de_DE');         // 1.234,56
-MoneyFormatter::numberFormat(123456, 'sv_SE');         // 1 234,56
-MoneyFormatter::numberFormat('not a number', 'en_US'); // ''
+MoneyFormatter::numberFormat(123456, 'en_US');                      // 1,234.56
+MoneyFormatter::numberFormat('123456', 'en_US');                    // 1,234.56
+MoneyFormatter::numberFormat($money->getAmount(), 'en_US');         // 1,234.56
+MoneyFormatter::numberFormat(123456, 'de_DE');                      // 1.234,56
+MoneyFormatter::numberFormat(123456, 'sv_SE');                      // 1 234,56
 
-MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: 0);  // 1,235
-MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: -2); // 1,200
+MoneyFormatter::numberFormat(1234.56, 'en_US', minorUnits: false);  // 1,234.56
+MoneyFormatter::numberFormat(123456, 'en_US', minorUnits: false);   // 123,456.00
+MoneyFormatter::numberFormat('not a number', 'en_US');              // ''
+
+MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: 0, minorUnits: false);  // 1,235
+MoneyFormatter::numberFormat(1234.56, 'en_US', decimals: -2, minorUnits: false); // 1,200
 
 MoneyFormatter::numberFormat(123456, 'en_US', minorDecimals: 0);              // 123,456.00
 MoneyFormatter::numberFormat(123456, 'en_US', minorDecimals: 2);              // 1,234.56
 MoneyFormatter::numberFormat(123456, 'en_US', decimals: 4, minorDecimals: 4); // 12.3456
+
+// The eight minor units of a crypto currency, which format() cannot render since ICU has no data for it
+MoneyFormatter::numberFormat(100000000, 'en_US', decimals: 8, minorDecimals: 8); // 1.00000000
 ```
 
 ### `formatShort`
@@ -415,14 +454,16 @@ public static function formatShort(
     null|int|string|Money $value,
     Currency|MoneyCurrency $currency,
     string $locale,
-    int $decimals = 2,
+    ?int $decimals = null,
     bool $showCurrencySymbol = true,
 ): string
 ```
 
 Amounts below 1000 of the currency's own major unit are formatted in full — 100000 minor units for USD,
-1000 for JPY. The abbreviation itself uses the minor unit of the currency too, so `formatShort()` and
-`format()` always agree about the magnitude of an amount.
+1000 for JPY — where the currency decides the decimals. The abbreviation itself uses the minor unit of
+the currency too, so `formatShort()` and `format()` always agree about the magnitude of an amount, while
+the abbreviated mantissa keeps two decimals whatever the currency: ¥1.23M says three digits that ¥1M
+would lose.
 
 ```php
 use Pelmered\LaraPara\Currencies\Currency;
@@ -438,6 +479,7 @@ MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'en_US', decim
 MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1.23M
 
 MoneyFormatter::formatShort(99999, Currency::fromCode('USD'), 'en_US'); // $999.99
+MoneyFormatter::formatShort(999, Currency::fromCode('JPY'), 'en_US');   // ¥999
 MoneyFormatter::formatShort(0, Currency::fromCode('USD'), 'en_US');     // $0.00
 
 MoneyFormatter::formatShort(1234567, Currency::fromCode('JPY'), 'en_US'); // ¥1.23M — 0 minor units
@@ -453,7 +495,6 @@ public static function parseDecimal(
     ?string $moneyString,
     Currency|MoneyCurrency $currency,
     string $locale,
-    int $decimals = 2,
     ?bool $strict = null,
 ): string
 ```
@@ -755,8 +796,8 @@ MONEY_LOAD_CRYPTO_CURRENCIES=true
 
 Support for them is partial, since crypto currencies are not part of ISO 4217 and `intl` has no data for
 them. `Currency::fromCode('BTC')` works and gives you the right minor unit (8), and `getFormattingRules()`
-returns the currency code as the symbol, but formatting an amount *with* a currency symbol through
-`format()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`.
+returns the currency code as the symbol and its eight fraction digits, but formatting an amount *with* a
+currency symbol through `format()` or `formatMoney()` throws `Money\Exception\UnknownCurrencyException`.
 
 Use `numberFormat()` with the currency's minor unit and add the symbol yourself:
 
@@ -769,7 +810,12 @@ Note that `format(..., showCurrencySymbol: false)` is not a substitute here: it 
 ISO 4217 data, which has nothing to say about a crypto currency, so it throws `UnknownCurrencyException`
 just as `format()` does. For ISO currencies it uses the minor unit of the currency correctly.
 
-The crypto list also has no currency names, so `Currency::name` is an empty string for those.
+The crypto list carries no names of its own, so `Currency::name` is the code for those — `BTC - BTC` in a
+select array.
+
+Crypto amounts do not fit `store.format = decimal` at the default scale either: eight minor units need
+`store.decimal_scale = 8` and a column to match, or integer storage. `MoneyCast` throws
+`InvalidAmount` rather than letting the database round the amount away.
 
 ### Custom currency lists
 

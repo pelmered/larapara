@@ -9,7 +9,7 @@ use Money\Money;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Throws;
 
-class Currency implements \Stringable
+class Currency implements \JsonSerializable, \Stringable
 {
     public function __construct(
         public string $code,
@@ -66,6 +66,11 @@ class Currency implements \Stringable
         return $this->code;
     }
 
+    /**
+     * The code alone, so a serialized currency reads as the value it is rather than as a record of the
+     * registry: `"USD"` beside the `{amount, currency}` of a serialized Money, not a second object
+     * repeating the code with a display name next to it.
+     */
     public function jsonSerialize(): string
     {
         return $this->code;

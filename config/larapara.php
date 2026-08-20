@@ -17,6 +17,11 @@ return [
     */
     'store' => [
         'format' => 'int', // Allowed values: 'int' or 'decimal'
+
+        // Decimals a decimal column keeps, which is what the column macros give it and what an
+        // amount is refused for carrying more of. Three covers every ISO currency but CLF and UYW;
+        // crypto currencies carry eight.
+        'decimal_scale' => 3,
     ],
     /*
     |---------------------------------------------------------------------------

@@ -8,6 +8,15 @@ use InvalidArgumentException;
 
 class InvalidAmount extends InvalidArgumentException
 {
+    public static function exceedsStoredScale(string $value, string $currency, int $minorUnit, int $scale): self
+    {
+        return new self(
+            'The amount "'.$value.'" in '.$currency.' carries '.$minorUnit.' decimals, and decimal storage keeps '
+            .$scale.'. Raise `larapara.store.decimal_scale` (and the column scale), pass a scale to the column '
+            .'macro, or store amounts as integer minor units.'
+        );
+    }
+
     public static function notMinorUnits(string $value): self
     {
         return new self(
