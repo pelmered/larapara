@@ -111,7 +111,7 @@ class LaraParaServiceProvider extends PackageServiceProvider
         bool $nullable = false,
         ?int $scale = null,
     ): ColumnDefinition {
-        $currencyColumn = $name.config('larapara.currency_column_suffix', '_currency');
+        $currencyColumn = static::currencyColumnFor($name);
 
         if (config('larapara.store.format') === 'decimal') {
             $decimalScale = $scale ?? static::decimalScale();
@@ -146,6 +146,15 @@ class LaraParaServiceProvider extends PackageServiceProvider
         $table->index([$currencyColumn, $name], $indexName);
 
         return $amount;
+    }
+
+    /**
+     * The name of the currency column beside an amount column, which the macros write and the
+     * casts read, so the two sides cannot disagree about it.
+     */
+    public static function currencyColumnFor(string $name): string
+    {
+        return $name.config('larapara.currency_column_suffix', '_currency');
     }
 
     /**

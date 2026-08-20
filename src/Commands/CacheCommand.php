@@ -16,7 +16,7 @@ class CacheCommand extends Command
     {
         $currencies = CurrencyRepository::getAvailableCurrencies();
 
-        if (config('larapara.currency_cache.type')) {
+        if (CurrencyRepository::isCacheEnabled()) {
             $this->info($currencies->count().' Currencies cached.');
         } else {
             $this->warn('The currency cache is disabled, so nothing was cached. Set larapara.currency_cache.type to enable it.');

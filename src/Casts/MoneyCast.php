@@ -50,23 +50,19 @@ class MoneyCast implements CastsAttributes
     #[Returns('array<string, int|float|string|null>')]
     public function set(Model $model, string $key, mixed $value, array $attributes): array
     {
-        $amount      = $this->getAmount($model, $key, $value);
-        $currency    = $this->getCurrency($model, $key, $value);
-        $currencyKey = $key.config('larapara.currency_column_suffix', '_currency');
+        $amount   = $this->getAmount($model, $key, $value);
+        $currency = $this->getCurrency($model, $key, $value);
 
-        // Before the format branch, since dividing null by the scale factor would store a zero.
-        if ($amount === null) {
-            return [
-                $key         => null,
-                $currencyKey => $currency,
-            ];
-        }
+        $stored = match (true) {
+            // Before the format branch, since dividing null by the scale factor would store a zero.
+            $amount                         === null                              => null,
+            config('larapara.store.format') === 'decimal' => $this->toDecimal($amount, $currency),
+            default                                       => $amount,
+        };
 
         return [
-            $key => config('larapara.store.format') === 'decimal'
-                ? $this->toDecimal($amount, $currency)
-                : $amount,
-            $currencyKey => $currency,
+            $key                                             => $stored,
+            LaraParaServiceProvider::currencyColumnFor($key) => $currency,
         ];
     }
 
@@ -99,7 +95,7 @@ class MoneyCast implements CastsAttributes
 
     protected function getCurrencyFromModel(Model $model, string $name): MoneyCurrency
     {
-        $currency = $model->{$name.config('larapara.currency_column_suffix', '_currency')} ?? config('larapara.default_currency');
+        $currency = $model->{LaraParaServiceProvider::currencyColumnFor($name)} ?? config('larapara.default_currency');
 
         if ($currency instanceof MoneyCurrency) {
             return $currency;
@@ -183,6 +179,8 @@ class MoneyCast implements CastsAttributes
 
     public function getDecimals(string $currencyCode): int
     {
-        return Currency::fromCode($currencyCode)->minorUnit ?? 2;
+        // The formatter's resolver, so the scale an amount is stored at is the scale it is
+        // formatted and parsed at — two lookups here would let the two drift apart.
+        return MoneyFormatter::getMinorUnit(Currency::fromCode($currencyCode));
     }
 }

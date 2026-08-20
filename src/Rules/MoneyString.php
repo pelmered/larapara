@@ -63,15 +63,16 @@ class MoneyString implements ValidationRule
             return $this->currency;
         }
 
-        $code = is_string($this->currency) || $this->currency instanceof \Stringable
-            ? trim((string) $this->currency)
-            : '';
-
-        try {
-            return Currency::fromCode($code !== '' ? $code : (string) config('larapara.default_currency'));
-        } catch (UnsupportedCurrency) {
-            return MoneyFormatter::getDefaultCurrency();
+        if (is_string($this->currency) || $this->currency instanceof \Stringable) {
+            try {
+                return Currency::fromCode((string) $this->currency);
+            } catch (UnsupportedCurrency) {
+                // Not a supported code, so the default reads the amount: refusing the code is
+                // SupportedCurrency's business.
+            }
         }
+
+        return MoneyFormatter::getDefaultCurrency();
     }
 
     protected function fail(Closure $fail, Currency|MoneyCurrency $currency, string $locale): void

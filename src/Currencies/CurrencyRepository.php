@@ -27,6 +27,21 @@ class CurrencyRepository
      */
     public const FLEXIBLE_CREATED_KEY_PREFIX = 'illuminate:cache:flexible:created:';
 
+    /**
+     * The cache types getAvailableCurrencies() writes through, which is what "the cache is
+     * enabled" means: any other type resolves the currencies uncached.
+     */
+    private const CACHE_TYPES = ['remember', 'flexible', 'forever'];
+
+    /**
+     * Whether getAvailableCurrencies() writes through the cache — the same question money:cache
+     * answers when it reports, so the two cannot drift.
+     */
+    public static function isCacheEnabled(): bool
+    {
+        return in_array(Config::get('larapara.currency_cache.type'), self::CACHE_TYPES, true);
+    }
+
     public static function isValid(Currency $currency): bool
     {
         // By code, since Collection::contains() compares whole objects: a currency built from just a
