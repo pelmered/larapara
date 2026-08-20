@@ -52,12 +52,12 @@ return [
     | Strict parsing
     |---------------------------------------------------------------------------
     |
-    | MoneyFormatter::parseDecimal() forgives a separator that is out of place:
+    | MoneyFormatter::parseToMinor() forgives a separator that is out of place:
     | a dot is read as the decimal separator of the locale, and a grouping
     | separator out of position is dropped. Set this to true to accept only
     | what the locale itself writes, and throw for anything else.
     |
-    | Every parseDecimal() call takes a `strict` argument that overrides this,
+    | Every parseToMinor() call takes a `strict` argument that overrides this,
     | so a lenient form and a strict import can live in the same application.
     |
     */
