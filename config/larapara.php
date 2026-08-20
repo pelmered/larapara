@@ -19,7 +19,7 @@ return [
         'format' => 'int', // Allowed values: 'int' or 'decimal'
 
         // Decimals a decimal column keeps, which is what the column macros give it and what an
-        // amount is refused for carrying more of. Most currencies needs only 2 so that might 
+        // amount is refused for carrying more of. Most currencies needs only 2 so that might
         // be enough if you want to optimize. Three covers all ISO currencies except
         // CLF and UYW that needs 4
         // Crypto currencies needs up to 8
