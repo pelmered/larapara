@@ -30,9 +30,13 @@ it('publishes its config file', function (): void {
         ->and(array_key_first($paths))->toEndWith('config/larapara.php');
 });
 
-// The package ships no lang directory, so registering translations only published an empty tag.
-it('publishes no translations', function (): void {
-    expect(ServiceProvider::pathsToPublish(LaraParaServiceProvider::class, 'larapara-translations'))->toBe([]);
+// The validation rules address their messages as larapara::validation.*, which only resolves while
+// the lang directory is registered.
+it('publishes its translations', function (): void {
+    $paths = ServiceProvider::pathsToPublish(LaraParaServiceProvider::class, 'larapara-translations');
+
+    expect($paths)->not->toBeEmpty()
+        ->and(array_key_first($paths))->toEndWith('resources/lang');
 });
 
 it('merges its config with the application config', function (): void {

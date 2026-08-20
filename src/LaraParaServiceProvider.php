@@ -18,6 +18,7 @@ class LaraParaServiceProvider extends PackageServiceProvider
     {
         $package->name(static::$name)
             ->hasConfigFile()
+            ->hasTranslations()
             ->hasCommands([
                 CacheCommand::class,
                 ClearCacheCommand::class,

@@ -63,11 +63,6 @@ the other ICU currency styles — the cash and standard variants, which have no 
 though their patterns carry the same currency placeholder. Any style whose pattern has one now honours
 the setting.
 
-## The `larapara-translations` publish tag is gone
-
-The package registered translations without shipping any, so `vendor:publish --tag=larapara-translations`
-published nothing. Nothing consumed it, and `trans('larapara::...')` returned the key either way.
-
 ## Currency codes are validated as they are written
 
 `CurrencyCast::set()` and `MoneyCast::set()` now normalize the code (trimmed, upper-cased) and refuse a
