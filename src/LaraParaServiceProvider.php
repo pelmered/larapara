@@ -113,9 +113,19 @@ class LaraParaServiceProvider extends PackageServiceProvider
     ): ColumnDefinition {
         $currencyColumn = $name.config('larapara.currency_column_suffix', '_currency');
 
-        $amount = config('larapara.store.format') === 'decimal'
-            ? $table->decimal($name, $decimalTotal, $scale ?? static::decimalScale())
-            : $table->{$integerType}($name);
+        if (config('larapara.store.format') === 'decimal') {
+            $decimalScale = $scale ?? static::decimalScale();
+
+            if ($decimalScale > $decimalTotal) {
+                throw new \InvalidArgumentException(
+                    'The decimal scale '.$decimalScale.' does not fit a decimal('.$decimalTotal.') column.'
+                );
+            }
+
+            $amount = $table->decimal($name, $decimalTotal, $decimalScale);
+        } else {
+            $amount = $table->{$integerType}($name);
+        }
 
         if ($unsigned) {
             $amount->unsigned();
