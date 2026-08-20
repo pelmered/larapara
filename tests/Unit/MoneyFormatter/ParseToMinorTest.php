@@ -2,7 +2,9 @@
 
 use Money\Currency as MoneyCurrency;
 use Money\Exception\ParserException;
+use Money\Money;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 beforeEach(function (): void {
@@ -501,3 +503,65 @@ it('refuses the other notation and typed spaces in strict mode', function (strin
     'the code while the symbol is configured' => ['en_US', 'USD', 'USD 12'],
     'spaces a keyboard produced'              => ['sv_SE', 'SEK', '1 234,56 kr'],
 ]);
+
+/*
+|--------------------------------------------------------------------------
+| parseToMoney
+|--------------------------------------------------------------------------
+*/
+
+// The inverse of format(): what one writes, the other reads back, currency and all.
+it('reads a string into the Money that formats back to it', function (string $currency, string $locale): void {
+    $money     = new Money(123456, new MoneyCurrency($currency));
+    $formatted = MoneyFormatter::format($money, $locale);
+
+    $parsed = MoneyFormatter::parseToMoney($formatted, $currency, $locale);
+
+    expect($parsed)->toBeInstanceOf(Money::class)
+        ->and($parsed->equals($money))->toBeTrue()
+        ->and(MoneyFormatter::format($parsed, $locale))->toBe($formatted);
+})->with([
+    'dollars'            => ['USD', 'en_US'],
+    'krona'              => ['SEK', 'sv_SE'],
+    'euro'               => ['EUR', 'de_DE'],
+    'yen, no minor unit' => ['JPY', 'ja_JP'],
+]);
+
+it('takes the currency as a code, an object or a Money currency', function (mixed $currency): void {
+    expect(MoneyFormatter::parseToMoney('$1,234.56', $currency, 'en_US')?->getAmount())->toBe('123456');
+})->with([
+    'a code'           => ['USD'],
+    'a padded code'    => [' usd '],
+    'a currency'       => fn (): Currency => Currency::fromCode('USD'),
+    'a money currency' => fn (): MoneyCurrency => new MoneyCurrency('USD'),
+]);
+
+// A code from a request is validated where it is read, rather than stored and thrown for later.
+it('refuses a currency code this configuration does not support', function (): void {
+    expect(fn (): ?Money => MoneyFormatter::parseToMoney('1,234.56', 'GBP', 'en_US'))
+        ->toThrow(UnsupportedCurrency::class);
+});
+
+// A code carries the minor unit of a currency ICU knows nothing about, where a Money currency does not.
+it('reads a currency outside ISO 4217 from its code', function (): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', 'BTC'],
+    ]);
+
+    expect(MoneyFormatter::parseToMoney('1.00000000', 'BTC', 'en_US')?->getAmount())->toBe('100000000')
+        ->and(MoneyFormatter::parseToMoney('1.00000000', new MoneyCurrency('BTC'), 'en_US')?->getAmount())->toBe('100');
+});
+
+it('reads nothing as nothing', function (?string $value): void {
+    expect(MoneyFormatter::parseToMoney($value, 'USD', 'en_US'))->toBeNull();
+})->with([
+    'null'         => [null],
+    'empty string' => [''],
+]);
+
+it('passes strictness on', function (): void {
+    expect(MoneyFormatter::parseToMoney('1.5', 'SEK', 'sv_SE')?->getAmount())->toBe('150')
+        ->and(fn (): ?Money => MoneyFormatter::parseToMoney('1.5', 'SEK', 'sv_SE', strict: true))
+        ->toThrow(ParserException::class);
+});

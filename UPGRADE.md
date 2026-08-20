@@ -128,6 +128,17 @@ means the value is a plain number.
 currency at a different magnitude, and it disagreed with `format()`, which ignored the argument. Each half
 is its own method now, with one input shape and no argument to ignore.
 
+## `parseToMoney()` reads a string into a Money
+
+The inverse of `format()`, and the bookend the parse side was missing: callers were building
+`new Money(MoneyFormatter::parseDecimal(...), $currency->toMoneyCurrency())` by hand. The currency may be
+a code, which is what a request carries, and one `available_currencies` does not list is refused there
+rather than stored and read back as an exception.
+
+```php
+$post->price = MoneyFormatter::parseToMoney($request->input('price'), $request->input('currency'), app()->getLocale());
+```
+
 ## `parseToMinor()` is the new name of `parseDecimal()`, and it reads a currency symbol
 
 The name says what it returns — the minor units of the currency you pass, as a numeric string — the way

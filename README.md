@@ -275,7 +275,8 @@ Which method to call is decided by what you have in hand:
 | minor units and a currency | [`formatFromMinor()`](#formatfromminor) | `formatFromMinor(123456, $usd, 'en_US')` |
 | either, abbreviated | [`formatShort()`](#formatshort-and-formatshortfromminor) / `formatShortFromMinor()` | `$1.23M` |
 | a number that is not an amount | [`formatNumber()`](#formatnumber) | `formatNumber(1234.56, 'en_US')` |
-| a localized string from a user | [`parseToMinor()`](#parsetominor) | `'1,234.56'` → `'123456'` |
+| a localized string from a user | [`parseToMoney()`](#parsetomoney) | `'$1,234.56'` → `Money` |
+| the same, as raw minor units | [`parseToMinor()`](#parsetominor) | `'1,234.56'` → `'123456'` |
 
 For all methods that take `$decimals`: a positive value is the number of decimals, and a negative value is
 the number of significant digits, so `-2` on `12345678` gives `$120,000`. This only affects the formatted
@@ -661,6 +662,42 @@ MoneyFormatter::parseToMinor('invalid', Currency::fromCode('USD'), 'en_US');
 // Money\Exception\ParserException: The value must be a valid numeric value.
 MoneyFormatter::parseToMinor('12 USD', Currency::fromCode('USD'), 'en_US');
 // Money\Exception\ParserException: The value must be a valid numeric value.
+```
+
+### `parseToMoney`
+
+Reads a localized amount string into a `Money` object, which is the inverse of [`format()`](#format):
+what one writes, the other reads back.
+
+```php
+public static function parseToMoney(
+    ?string $moneyString,
+    Currency|MoneyCurrency|string $currency,
+    string $locale,
+    ?bool $strict = null,
+): ?Money
+```
+
+- `$currency`: a LaraPara `Currency`, a `Money\Currency`, or a currency code. A code is resolved through
+  the registry, so one `available_currencies` does not list throws `UnsupportedCurrency` here rather than
+  being stored and read back as an exception later. A code also carries the minor unit of a currency ICU
+  has no data for, which a bare `Money\Currency` does not.
+- Everything else behaves as [`parseToMinor()`](#parsetominor), which this method reads the amount with.
+- Returns `null` for `null`/`''`, since no amount is not an amount of anything.
+
+```php
+use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
+
+$price = MoneyFormatter::parseToMoney($request->input('price'), $request->input('currency'), app()->getLocale());
+
+$post->price = $price;  // MoneyCast stores the amount and the currency together
+```
+
+```php
+MoneyFormatter::parseToMoney('$1,234.56', 'USD', 'en_US');   // Money(123456, USD)
+MoneyFormatter::parseToMoney('1 234,56 kr', 'SEK', 'sv_SE'); // Money(123456, SEK)
+MoneyFormatter::parseToMoney('', 'USD', 'en_US');            // null
+MoneyFormatter::parseToMoney('1,234.56', 'GBP', 'en_US');    // UnsupportedCurrency
 ```
 
 ### `getFormattingRules`

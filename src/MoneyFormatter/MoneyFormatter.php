@@ -17,6 +17,7 @@ use Money\Parser\DecimalMoneyParser;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
@@ -221,6 +222,7 @@ class MoneyFormatter
      * A numeric string rather than an int, since that is what a Money holds and what the casts store,
      * and it carries an amount past the range an int keeps losslessly.
      */
+    #[Returns("numeric-string|''")]
     public static function parseToMinor(
         ?string $moneyString,
         Currency|MoneyCurrency $currency,
@@ -299,6 +301,36 @@ class MoneyFormatter
             new ISOCurrencies,
             new CurrencyList([$currency->getCode() => $minorUnit]),
         ]);
+    }
+
+    /**
+     * Reads a localized amount string into a Money object, which is the inverse of format().
+     *
+     * A currency given as a code is resolved through the registry, so one this configuration does not
+     * support is refused here rather than stored and read back as an exception — and a code carries
+     * the minor unit of a currency ICU has no data for, which a bare Money\Currency does not.
+     *
+     * Null for an empty string, since no amount is not an amount of anything.
+     */
+    #[Throws(ParserException::class)]
+    #[Throws(UnsupportedCurrency::class)]
+    public static function parseToMoney(
+        ?string $moneyString,
+        Currency|MoneyCurrency|string $currency,
+        string $locale,
+        ?bool $strict = null,
+    ): ?Money {
+        $currency = is_string($currency) ? Currency::fromCode(trim($currency)) : $currency;
+        $amount   = static::parseToMinor($moneyString, $currency, $locale, $strict);
+
+        if ($amount === '') {
+            return null;
+        }
+
+        return new Money(
+            $amount,
+            $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency,
+        );
     }
 
     public static function getFormattingRules(string $locale, Currency|MoneyCurrency $currency): CurrencyFormattingRules
