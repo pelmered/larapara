@@ -27,6 +27,9 @@
         "php": "^8.2",
         "ext-intl": "*",
         "moneyphp/money": "^4.0",
+        "illuminate/console": "^11.28 | ^12 | ^13",
+        "illuminate/contracts": "^11.28 | ^12 | ^13",
+        "illuminate/database": "^11.28 | ^12 | ^13",
         "illuminate/support": "^11.28 | ^12 | ^13",
         "php-static-analysis/attributes": "^0.3.1 | ^0.4.0",
         "spatie/laravel-package-tools": "^1.92"

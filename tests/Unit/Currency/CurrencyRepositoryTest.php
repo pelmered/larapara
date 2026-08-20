@@ -26,8 +26,7 @@ class LowerCasedCurrenciesProvider implements CurrenciesProvider
 }
 
 beforeEach(function (): void {
-    // Clear cache between tests
-    Cache::flush();
+    CurrencyRepository::clearCache();
     Cache::shouldReceive('remember')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
     Cache::shouldReceive('flexible')->andReturnUsing(fn ($key, $ttl, $callback) => $callback());
     Cache::shouldReceive('rememberForever')->andReturnUsing(fn ($key, $callback) => $callback());
@@ -46,6 +45,15 @@ it('checks if a currency is valid', function (): void {
 
     // Test with an invalid currency
     expect(CurrencyRepository::isValid($invalidCurrency))->toBeFalse();
+});
+
+// Validity is a property of the code: the registry's own currency carries a name and a minor unit
+// that a currency built from just a code does not, and comparing whole objects made it invalid.
+it('checks a currency that carries nothing but its code', function (): void {
+    Config::set('larapara.available_currencies', ['USD']);
+
+    expect(CurrencyRepository::isValid(new Currency('USD', '')))->toBeTrue()
+        ->and(CurrencyRepository::isValid(new Currency('EUR', '')))->toBeFalse();
 });
 
 it('checks if a currency code is valid', function (): void {
@@ -170,6 +178,20 @@ it('loads all available currencies when none specified', function (): void {
         ->and($currencies->has('USD'))->toBeTrue()
         ->and($currencies->has('EUR'))->toBeTrue()
         ->and($currencies->has('GBP'))->toBeTrue();
+});
+
+// The bundled crypto data is shaped differently from the ISO data, which left every crypto currency
+// with an empty name where it is displayed.
+it('names the crypto currencies it loads', function (): void {
+    Config::set('larapara.currency_cache.type', false);
+    Config::set('larapara.load_crypto_currencies', true);
+    Config::set('larapara.available_currencies', ['USD', 'BTC']);
+
+    expect(Currency::fromCode('BTC'))
+        ->name->toBe('BTC')
+        ->minorUnit->toBe(8)
+        ->and(CurrencyRepository::getAvailableCurrencies()->toSelectArray())
+        ->toBe(['USD' => 'USD - US Dollar', 'BTC' => 'BTC - BTC']);
 });
 
 it('loads crypto currencies when enabled', function (): void {

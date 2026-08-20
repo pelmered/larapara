@@ -1,8 +1,5 @@
 <?php
 
-// Let's skip the actual cache checks in these tests
-// and focus on ensuring the commands run successfully
-
 use Illuminate\Support\Facades\Cache;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
 use Pelmered\LaraPara\Currencies\CurrencyRepository;
@@ -44,6 +41,19 @@ test('clear cache command runs successfully', function (): void {
     expect(Cache::has('larapara_currencies'))->toBeFalse();
 });
 
+// The command reported a cache write that the disabled cache never made.
+test('cache command reports that a disabled cache was not written', function (): void {
+    config(['larapara.currency_cache.type' => false]);
+
+    CurrencyRepository::clearCache();
+
+    test()->artisan('money:cache')
+        ->expectsOutputToContain('The currency cache is disabled')
+        ->assertExitCode(0);
+
+    expect(Cache::has(CurrencyRepository::CACHE_KEY))->toBeFalse();
+});
+
 test('cache command in verbose mode shows currency table', function (): void {
     config(['larapara.currency_cache.type' => 'remember']);
     config(['larapara.currency_cache.ttl' => '500']);
@@ -65,10 +75,3 @@ test('cache command in verbose mode shows currency table', function (): void {
         )
         ->assertExitCode(0);
 });
-
-/*
-test('optimize command also adds currencies to cache', function () {
-    test()->artisan('optimize')
-         ->assertExitCode(0);
-});
-*/

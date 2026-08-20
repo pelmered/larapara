@@ -30,7 +30,7 @@ function validateValue(mixed $value, object $rule): Illuminate\Validation\Valida
 function localizedAmount(mixed $value, string $locale, string $currency): mixed
 {
     return $value === 'localized'
-        ? MoneyFormatter::format(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false)
+        ? MoneyFormatter::formatFromMinor(123456, Currency::fromCode($currency), $locale, showCurrencySymbol: false)
         : $value;
 }
 
@@ -39,6 +39,15 @@ function localizedAmount(mixed $value, string $locale, string $currency): mixed
 | MoneyString
 |--------------------------------------------------------------------------
 */
+
+// The currency of the field written beside the amount is read, wherever a person put it.
+it('passes an amount written with its own currency', function (string $value): void {
+    expect(validateValue($value, new MoneyString('USD', 'en_US'))->passes())->toBeTrue();
+})->with([
+    'symbol'        => ['$1,234.56'],
+    'trailing code' => ['12 USD'],
+    'leading code'  => ['USD 12'],
+]);
 
 it('passes an amount its locale can read', function (string $locale, string $currency, mixed $value): void {
     expect(validateValue(localizedAmount($value, $locale, $currency), new MoneyString($currency, $locale))->passes())->toBeTrue();
@@ -59,7 +68,8 @@ it('fails an amount no locale can read', function (mixed $value): void {
     expect(validateValue($value, new MoneyString('USD', 'en_US'))->passes())->toBeFalse();
 })->with([
     'a word'                 => ['nonsense'],
-    'trailing text'          => ['12 USD'],
+    'trailing text'          => ['12 dollars'],
+    'another currency'       => ['12 EUR'],
     'two decimal separators' => ['1.2.3'],
     'not finite'             => ['NaN'],
     'an array'               => [['1234']],
@@ -214,3 +224,18 @@ it('registers its translations under the package namespace', function (): void {
     expect(trans('larapara::validation.supported_currency'))
         ->toBe('The selected :attribute is not a supported currency.');
 });
+
+// A currency ISO 4217 has no data for used to raise UnknownCurrencyException from inside the parser,
+// which is not a failure a request can report — the rule either passes or fails now.
+it('validates an amount in a currency outside ISO 4217', function (mixed $value, bool $passes): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', 'BTC'],
+    ]);
+
+    expect(validateValue($value, new MoneyString('BTC', 'en_US'))->passes())->toBe($passes);
+})->with([
+    'the amount of a whole coin' => ['1.00000000', true],
+    'the smallest unit'          => ['0.00000001', true],
+    'not a number'               => ['not a number', false],
+]);

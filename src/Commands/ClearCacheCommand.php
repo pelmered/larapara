@@ -5,18 +5,15 @@ declare(strict_types=1);
 namespace Pelmered\LaraPara\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
-use PhpStaticAnalysis\Attributes\Throws;
-use Psr\SimpleCache\InvalidArgumentException;
+use Pelmered\LaraPara\Currencies\CurrencyRepository;
 
 class ClearCacheCommand extends Command
 {
     protected $signature = 'money:clear';
 
-    #[Throws(InvalidArgumentException::class)]
     public function handle(): void
     {
-        Cache::delete('larapara_currencies');
+        CurrencyRepository::clearCache();
 
         $this->info('Currencies cache cleared.');
     }

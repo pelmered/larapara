@@ -3,3 +3,7 @@
 .phpunit.cache/
 coverage.xml
 composer.lock
+reports/coverage/
+
+# Review notes, which live here rather than in the package
+code-review-*.md

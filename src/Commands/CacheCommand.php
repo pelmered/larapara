@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\Commands;
 
 use Illuminate\Console\Command;
@@ -14,7 +16,11 @@ class CacheCommand extends Command
     {
         $currencies = CurrencyRepository::getAvailableCurrencies();
 
-        $this->info($currencies->count().' Currencies cached.');
+        if (config('larapara.currency_cache.type')) {
+            $this->info($currencies->count().' Currencies cached.');
+        } else {
+            $this->warn('The currency cache is disabled, so nothing was cached. Set larapara.currency_cache.type to enable it.');
+        }
 
         if ($this->option('verbose')) {
             $this->table(

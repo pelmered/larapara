@@ -11,6 +11,24 @@ class CryptoCurrenciesProvider implements CurrenciesProvider
     #[Type('array<string, array{alphabeticCode: string, currency: string, minorUnit: int, numericCode: int}>')]
     public function loadCurrencies(): array
     {
+        // The bundled data below carries a symbol and a minor unit, while the rest of the package
+        // reads the shape the interface declares. A crypto currency has no name of its own, so its
+        // code stands in for one — without this the name is empty everywhere it is displayed — and
+        // no ISO numeric code at all.
+        return array_map(
+            static fn (array $currency): array => [
+                'alphabeticCode' => $currency['symbol'],
+                'currency'       => $currency['symbol'],
+                'minorUnit'      => $currency['minorUnit'],
+                'numericCode'    => 0,
+            ],
+            $this->currencies(),
+        );
+    }
+
+    #[Type('array<string, array{symbol: string, minorUnit: int}>')]
+    private function currencies(): array
+    {
         /**
          * @see https://github.com/moneyphp/money/blob/master/resources/binance.php
          * Updated: 2025-03-28

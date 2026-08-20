@@ -17,6 +17,13 @@ return [
     */
     'store' => [
         'format' => 'int', // Allowed values: 'int' or 'decimal'
+
+        // Decimals a decimal column keeps, which is what the column macros give it and what an
+        // amount is refused for carrying more of. Most currencies needs only 2 so that might 
+        // be enough if you want to optimize. Three covers all ISO currencies except
+        // CLF and UYW that needs 4
+        // Crypto currencies needs up to 8
+        'decimal_scale' => 3,
     ],
     /*
     |---------------------------------------------------------------------------
@@ -64,7 +71,7 @@ return [
     |---------------------------------------------------------------------------
     |
     | Provide your own custom currency list provider.
-    | It must implement the Money\Currencies interface
+    | It must implement the Pelmered\LaraPara\Currencies\Providers\CurrenciesProvider interface
     |
     */
     'currency_provider' => ISOCurrenciesProvider::class,
@@ -79,6 +86,7 @@ return [
     | For example: ['USD', 'EUR']
     | If you want to include all currencies, leave this as an empty array.
     | If you include all with an empty array, you may exclude currencies with 'excluded_currencies'.
+    | 'excluded_currencies' does not have any effect when 'available_currencies' is set.
     | TIP: In your .env file, you can set MONEY_AVAILABLE_CURRENCIES as a comma-separated string like this:
     | MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
     |
@@ -103,7 +111,7 @@ return [
     | Caching
     |---------------------------------------------------------------------------
     |
-    | Set to false to disable the currency cache.
+    | Set `type` to false to disable the currency cache.
     |
     */
     'currency_cache' => [

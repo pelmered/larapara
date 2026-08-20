@@ -1,7 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Pelmered\LaraPara\MoneyFormatter;
 
+use Locale;
+use Money\Currencies;
+use Money\Currencies\AggregateCurrencies;
+use Money\Currencies\CurrencyList;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
 use Money\Exception\ParserException;
@@ -11,6 +17,9 @@ use Money\Parser\DecimalMoneyParser;
 use NumberFormatter;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use Pelmered\LaraPara\Exceptions\InvalidNumber;
+use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
 
@@ -31,6 +40,19 @@ class MoneyFormatter
     private const PARSE_DECIMAL_PLACES = 14;
 
     /**
+     * Decimals an abbreviated mantissa carries when the caller names none.
+     *
+     * A property of the abbreviation rather than of the currency: ¥1.23M keeps three significant
+     * digits that the zero minor units of the yen would drop.
+     */
+    private const ABBREVIATED_DECIMALS = 2;
+
+    /**
+     * The character ICU substitutes the currency symbol for in a pattern.
+     */
+    private const CURRENCY_PLACEHOLDER = "\u{a4}";
+
+    /**
      * Characters that stand for one another as a grouping separator.
      *
      * A locale's grouping separator is one member of a class: sv_SE groups with a no-break space,
@@ -39,108 +61,213 @@ class MoneyFormatter
      * belongs, so the second reading has to know them all too. Otherwise which member CLDR happens to
      * name decides whose input is forgiven, and that differs between ICU releases.
      */
+    /**
+     * Formatters built so far, by everything they were built from.
+     *
+     * @var array<string, NumberFormatter>
+     */
+    private static array $numberFormatters = [];
+
+    /**
+     * Formatters the currency rules are read from, by locale and currency code.
+     *
+     * @var array<string, NumberFormatter>
+     */
+    private static array $currencyFormatters = [];
+
     private const GROUPING_SEPARATOR_CLASSES = [
         ["\u{0020}", "\u{00a0}", "\u{2009}", "\u{202f}"],
         ["\u{0027}", "\u{2019}", "\u{02bc}"],
     ];
 
-    public static function formatMoney(
+    /**
+     * Formats a Money object, which carries both the amount and the currency it is counted in.
+     */
+    public static function format(
         Money $money,
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
-        int $decimals = 2,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
+        bool $showCurrencySymbol = true,
     ): string {
-        $numberFormatter = self::getNumberFormatter($locale, $outputStyle, $decimals);
-        $moneyFormatter  = new IntlMoneyFormatter($numberFormatter, new ISOCurrencies);
-
-        return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
+        return static::formatFromMinor(
+            $money->getAmount(),
+            $money->getCurrency(),
+            $locale,
+            $outputStyle,
+            $decimals,
+            $significantDigits,
+            $showCurrencySymbol,
+        );
     }
 
-    public static function format(
-        null|int|string|Money $value,
+    /**
+     * Formats an amount given in the minor units of a currency: 123456 in USD is $1,234.56.
+     *
+     * Which is what every amount in this package is — what MoneyCast stores, what Money::getAmount()
+     * returns and what parseToMinor() reads a string into. An amount that is not whole minor units
+     * throws rather than being truncated into a plausible wrong one.
+     */
+    public static function formatFromMinor(
+        null|int|string $value,
         Currency|MoneyCurrency $currency,
         string $locale,
         int $outputStyle = NumberFormatter::CURRENCY,
-        int $decimals = 2,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
         bool $showCurrencySymbol = true,
     ): string {
         if ($value === '' || $value === null) {
             return '';
         }
 
-        $money = $value instanceof Money
-            ? $value
-            : new Money(
-                self::toMinorUnits($value),
-                $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
-            );
+        self::assertDigits($decimals, $significantDigits);
 
-        // The decimal style leaves out the currency symbol while still placing the decimal point
-        // by the minor unit of the currency.
-        return static::formatMoney($money, $locale, $showCurrencySymbol ? $outputStyle : NumberFormatter::DECIMAL, $decimals);
+        $minorUnit = self::getMinorUnit($currency);
+
+        // An amount carries the decimals of its currency unless the caller asks for others, which is
+        // what makes ¥1,000 and BHD 1,234.567 come out right without being asked for.
+        $decimals ??= $significantDigits === null ? $minorUnit : null;
+
+        if (! $showCurrencySymbol) {
+            // Nothing here needs ICU's data for the currency — only the minor unit, to place the
+            // decimal point — so this reads a currency ICU has never heard of, crypto included.
+            return static::formatNumber(
+                (float) self::toMinorUnits($value) / 10 ** $minorUnit,
+                $locale,
+                $decimals,
+                $significantDigits,
+            );
+        }
+
+        $money = new Money(
+            self::toMinorUnits($value),
+            $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency
+        );
+
+        $moneyFormatter = new IntlMoneyFormatter(
+            self::getNumberFormatter($locale, $outputStyle, $decimals, $significantDigits),
+            new ISOCurrencies,
+        );
+
+        return $moneyFormatter->format($money);  // Outputs something like "$1.234,56"
     }
 
-    public static function numberFormat(
+    /**
+     * Formats a number in a locale: 1234.5 in de_DE is "1.234,5".
+     *
+     * A number rather than an amount — nothing here is scaled, since a count of minor units means
+     * nothing without the currency that says how many of them make a unit, and amounts go through
+     * formatFromMinor(), which takes that currency. The value is a PHP number, not a localized
+     * string: reading one of those is parseToMinor()'s job.
+     *
+     * Without `decimals` or `significantDigits` the number keeps the decimals it has, which is what
+     * the locale would print. Empty in, empty out; anything else that is not a number is a mistake
+     * in the caller rather than a number to render as nothing.
+     */
+    #[Throws(InvalidNumber::class)]
+    public static function formatNumber(
         null|int|float|string $value,
         string $locale,
-        int $decimals = 2,
-        int $minorDecimals = 2
+        ?int $decimals = null,
+        ?int $significantDigits = null,
     ): string {
-        if (! is_numeric($value)) {
+        if ($value === null || $value === '') {
             return '';
         }
 
-        // An int is minor units, anything with a decimal point is already a major amount.
-        if (is_int($value)) {
-            $value /= 10 ** $minorDecimals;
+        if (! is_numeric($value)) {
+            throw InvalidNumber::notNumeric($value);
         }
 
-        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
+        self::assertDigits($decimals, $significantDigits);
+
+        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals, $significantDigits);
 
         return (string) $numberFormatter->format((float) $value);  // Outputs something like "1.234,56"
     }
 
+    /**
+     * Abbreviates a Money object: $1.23M rather than $1,234,567.89.
+     */
     public static function formatShort(
-        null|int|string|Money $value,
+        Money $money,
+        string $locale,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
+        bool $showCurrencySymbol = true,
+    ): string {
+        return static::formatShortFromMinor(
+            $money->getAmount(),
+            $money->getCurrency(),
+            $locale,
+            $decimals,
+            $significantDigits,
+            $showCurrencySymbol,
+        );
+    }
+
+    /**
+     * Abbreviates an amount given in the minor units of a currency.
+     */
+    public static function formatShortFromMinor(
+        null|int|string $value,
         Currency|MoneyCurrency $currency,
         string $locale,
-        int $decimals = 2,
-        bool $showCurrencySymbol = true
+        ?int $decimals = null,
+        ?int $significantDigits = null,
+        bool $showCurrencySymbol = true,
     ): string {
-        if ($value instanceof Money) {
-            $value = $value->getAmount();
-        }
-
         if ($value === '' || $value === null) {
             return '';
         }
+
+        self::assertDigits($decimals, $significantDigits);
 
         $major = (float) self::toMinorUnits($value) / 10 ** self::getMinorUnit($currency);
 
         // No need to abbreviate if the amount is less than 1000
         if (abs($major) < 1000) {
-            return static::format($value, $currency, $locale, decimals: $decimals, showCurrencySymbol: $showCurrencySymbol);
+            return static::formatFromMinor(
+                $value,
+                $currency,
+                $locale,
+                decimals: $decimals,
+                significantDigits: $significantDigits,
+                showCurrencySymbol: $showCurrencySymbol,
+            );
         }
 
-        [$mantissa, $suffix] = self::abbreviate($major, $decimals);
+        // Two decimals unless the caller says otherwise, since ¥1.23M keeps three significant digits
+        // that the zero minor units of the yen would drop.
+        $mantissaDecimals = $significantDigits === null ? $decimals ?? self::ABBREVIATED_DECIMALS : null;
+
+        [$mantissa, $suffix] = self::abbreviate($major, $mantissaDecimals ?? self::ABBREVIATED_DECIMALS);
 
         if (! $showCurrencySymbol) {
-            return static::numberFormat($mantissa, $locale, decimals: $decimals).$suffix;
+            return static::formatNumber($mantissa, $locale, $mantissaDecimals, $significantDigits).$suffix;
         }
 
         // The suffix goes into the ICU pattern rather than into the formatted output, which leaves
         // the symbol, its placement, the digits of the locale and its directional marks to ICU.
         $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
-        return (string) self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $decimals, numberSuffix: $suffix)
+        return (string) self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $mantissaDecimals, $significantDigits, numberSuffix: $suffix)
             ->formatCurrency($mantissa, $moneyCurrency->getCode());
     }
 
-    public static function parseDecimal(
+    /**
+     * Reads a localized amount string into the minor units of a currency: "1,234.56" in USD is 123456.
+     *
+     * A numeric string rather than an int, since that is what a Money holds and what the casts store,
+     * and it carries an amount past the range an int keeps losslessly.
+     */
+    #[Returns("numeric-string|''")]
+    public static function parseToMinor(
         ?string $moneyString,
         Currency|MoneyCurrency $currency,
         string $locale,
-        int $decimals = 2,
         ?bool $strict = null,
     ): string {
         if (is_null($moneyString) || $moneyString === '') {
@@ -149,19 +276,57 @@ class MoneyFormatter
 
         $strict ??= (bool) config('larapara.parse.strict', false);
 
+        // Read before the currency is narrowed to a Money one, which carries no minor unit of its own.
+        $minorUnit   = self::getMinorUnit($currency);
         $currency    = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
         $moneyString = trim($moneyString);
 
-        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals);
+        // The scale of the result comes from the currency, in the parser below: a number formatter
+        // reads every decimal the string carries whatever its fraction digits are set to.
+        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $minorUnit);
         $parsed          = self::parseLocalizedNumber($numberFormatter, $moneyString);
 
+        if ($parsed === false) {
+            // The formatter writes the symbol of the currency, so the parser reads it back: an
+            // application that shows $1,234.56 in a field gets that string in the request, and a
+            // parser that refuses its own output is a trap. Strict mode accepts this, since this is
+            // what the locale writes — in the notation this configuration writes it in.
+            $parsed = self::parseCurrencyAmount($moneyString, $currency, $locale, $minorUnit, anyNotation: false);
+        }
+
         if ($parsed === false && ! $strict) {
+            $formattingRules = self::getFormattingRules($locale, $currency);
+
             // Separators are the most common way for user input to miss its locale, so give them a
             // second reading before giving up. See: https://github.com/pelmered/larapara/issues/20
-            $rewritten = self::rewriteSeparators($moneyString, self::getFormattingRules($locale, $currency));
+            $rewritten = self::rewriteSeparators($moneyString, $formattingRules);
 
             if ($rewritten !== $moneyString) {
                 $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
+            }
+
+            if ($parsed === false) {
+                $parsed = self::parseCurrencyAmount($moneyString, $currency, $locale, $minorUnit, anyNotation: true);
+            }
+
+            if ($parsed === false) {
+                // The currency written where the locale does not put it. ICU reads a currency only
+                // where the formatter would have written it, and a person filling in a form is not a
+                // formatter: "12 USD" in a locale that writes "$12" has one reading and no other, so
+                // it is read like every other separator the locale itself would refuse.
+                $withoutCurrency = self::withoutCurrency($moneyString, $locale, $currency);
+
+                if ($withoutCurrency !== $moneyString) {
+                    $parsed = self::parseLocalizedNumber($numberFormatter, $withoutCurrency);
+
+                    if ($parsed === false) {
+                        $rewritten = self::rewriteSeparators($withoutCurrency, $formattingRules);
+
+                        if ($rewritten !== $withoutCurrency) {
+                            $parsed = self::parseLocalizedNumber($numberFormatter, $rewritten);
+                        }
+                    }
+                }
             }
         }
 
@@ -176,17 +341,66 @@ class MoneyFormatter
             // last representable digit of the double would decide it instead.
             $decimalString = sprintf('%.'.self::PARSE_DECIMAL_PLACES.'F', $parsed);
 
-            return (new DecimalMoneyParser(new ISOCurrencies))->parse($decimalString, $currency)->getAmount();
+            return (new DecimalMoneyParser(self::parseCurrencies($currency, $minorUnit)))
+                ->parse($decimalString, $currency)
+                ->getAmount();
         } catch (ParserException $parserException) {
             throw new ParserException('The value must be a valid numeric value.', 0, $parserException);
         }
+    }
+
+    /**
+     * The currency data the parser scales its result by.
+     *
+     * ISO 4217 first, since it is authoritative for the currencies it covers, with the minor unit of
+     * the currency being parsed behind it — otherwise a currency ISO has never heard of could be
+     * formatted but not read back, and the exception for it is not one a caller can catch as a
+     * parse failure.
+     */
+    #[Param(minorUnit: 'int<0, max>')]
+    private static function parseCurrencies(MoneyCurrency $currency, int $minorUnit): Currencies
+    {
+        return new AggregateCurrencies([
+            new ISOCurrencies,
+            new CurrencyList([$currency->getCode() => $minorUnit]),
+        ]);
+    }
+
+    /**
+     * Reads a localized amount string into a Money object, which is the inverse of format().
+     *
+     * A currency given as a code is resolved through the registry, so one this configuration does not
+     * support is refused here rather than stored and read back as an exception — and a code carries
+     * the minor unit of a currency ICU has no data for, which a bare Money\Currency does not.
+     *
+     * Null for an empty string, since no amount is not an amount of anything.
+     */
+    #[Throws(ParserException::class)]
+    #[Throws(UnsupportedCurrency::class)]
+    public static function parseToMoney(
+        ?string $moneyString,
+        Currency|MoneyCurrency|string $currency,
+        string $locale,
+        ?bool $strict = null,
+    ): ?Money {
+        $currency = is_string($currency) ? Currency::fromCode(trim($currency)) : $currency;
+        $amount   = static::parseToMinor($moneyString, $currency, $locale, $strict);
+
+        if ($amount === '') {
+            return null;
+        }
+
+        return new Money(
+            $amount,
+            $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency,
+        );
     }
 
     public static function getFormattingRules(string $locale, Currency|MoneyCurrency $currency): CurrencyFormattingRules
     {
         $config          = config('larapara');
         $currencyCode    = $currency->getCode();
-        $numberFormatter = new NumberFormatter($locale.'@currency='.$currencyCode, NumberFormatter::CURRENCY);
+        $numberFormatter = self::currencyFormatter($locale, $currencyCode);
 
         $currencySymbol = $currencyCode;
 
@@ -203,9 +417,20 @@ class MoneyFormatter
 
         return new CurrencyFormattingRules(
             currencySymbol: $currencySymbol,
-            fractionDigits: $numberFormatter->getAttribute(NumberFormatter::FRACTION_DIGITS),
+            fractionDigits: self::getMinorUnit($currency),
             decimalSeparator: $numberFormatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL),
             groupingSeparator: $numberFormatter->getSymbol(NumberFormatter::GROUPING_SEPARATOR_SYMBOL),
+        );
+    }
+
+    /**
+     * The formatter the rules and symbols of a currency are read from, in a locale.
+     */
+    private static function currencyFormatter(string $locale, string $currencyCode): NumberFormatter
+    {
+        return self::$currencyFormatters[$locale.'|'.$currencyCode] ??= new NumberFormatter(
+            self::currencyKeywordLocale($locale, $currencyCode),
+            NumberFormatter::CURRENCY,
         );
     }
 
@@ -217,19 +442,42 @@ class MoneyFormatter
     }
 
     /**
+     * Refuses a request for two kinds of precision at once, or for a negative amount of it.
+     *
+     * A negative `decimals` used to mean significant digits, which no signature said and no reader
+     * could guess, so it is a mistake now rather than a second meaning.
+     */
+    #[Throws(InvalidNumber::class)]
+    private static function assertDigits(?int $decimals, ?int $significantDigits): void
+    {
+        if ($decimals !== null && $significantDigits !== null) {
+            throw InvalidNumber::conflictingDigits();
+        }
+
+        if ($decimals !== null && $decimals < 0) {
+            throw InvalidNumber::negativeDecimals($decimals);
+        }
+
+        if ($significantDigits !== null && $significantDigits < 1) {
+            throw InvalidNumber::significantDigitsBelowOne($significantDigits);
+        }
+    }
+
+    /**
      * The minor unit of the currency, which is how many decimals its amounts carry.
      */
+    #[Returns('int<0, max>')]
     private static function getMinorUnit(Currency|MoneyCurrency $currency): int
     {
         $isoCurrencies = new ISOCurrencies;
         $moneyCurrency = $currency instanceof Currency ? $currency->toMoneyCurrency() : $currency;
 
         if ($isoCurrencies->contains($moneyCurrency)) {
-            return $isoCurrencies->subunitFor($moneyCurrency);
+            return max($isoCurrencies->subunitFor($moneyCurrency), 0);
         }
 
         // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data.
-        return $currency instanceof Currency ? $currency->minorUnit ?? 2 : 2;
+        return $currency instanceof Currency ? max($currency->minorUnit ?? 2, 0) : 2;
     }
 
     /**
@@ -327,6 +575,105 @@ class MoneyFormatter
     }
 
     /**
+     * Parses an amount written with the symbol of the currency it is being read as.
+     *
+     * Strictly, that is the notation this configuration writes — the symbol or the ISO code,
+     * according to `intl_currency_symbol`, where the locale puts it. Leniently, either notation and
+     * either member of the space class a keyboard might have produced between the two.
+     *
+     * ICU reads any currency's symbol, so the code it read has to be the one asked for: €10 read as
+     * USD is a refusal rather than ten dollars.
+     */
+    #[Param(minorUnit: 'int<0, max>')]
+    private static function parseCurrencyAmount(
+        string $value,
+        MoneyCurrency $currency,
+        string $locale,
+        int $minorUnit,
+        bool $anyNotation,
+    ): float|false {
+        $formatters = [self::getNumberFormatter($locale, NumberFormatter::CURRENCY, $minorUnit)];
+        $candidates = [$value];
+
+        if ($anyNotation) {
+            $formatters[] = self::currencyFormatter($locale, $currency->getCode());
+            $candidates[] = strtr($value, array_fill_keys(self::GROUPING_SEPARATOR_CLASSES[0], "\u{00a0}"));
+        }
+
+        foreach ($formatters as $formatter) {
+            foreach (array_unique($candidates) as $candidate) {
+                $code     = null;
+                $position = 0;
+                $parsed   = $formatter->parseCurrency($candidate, $code, $position);
+
+                if ($parsed === false || ! is_finite($parsed) || $position !== mb_strlen($candidate)) {
+                    continue;
+                }
+
+                if ($code === $currency->getCode()) {
+                    return $parsed;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The string without the currency beside it, wherever it was written.
+     *
+     * Only the currency being read, so "12 EUR" as USD stays a refusal rather than becoming twelve
+     * dollars, and only one occurrence of it, so "12 USD USD" is still not a number.
+     */
+    private static function withoutCurrency(string $value, string $locale, MoneyCurrency $currency): string
+    {
+        foreach (self::currencyNotations($locale, $currency) as $notation) {
+            if ($notation === '') {
+                continue;
+            }
+
+            foreach ([self::removePrefix($value, $notation), self::removeSuffix($value, $notation)] as $stripped) {
+                if ($stripped !== $value) {
+                    // Whatever stood between the two is the space of the locale, or the space of a
+                    // keyboard, and the separator rules below read either.
+                    return trim(str_replace(self::GROUPING_SEPARATOR_CLASSES[0], ' ', $stripped));
+                }
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * The ways the currency can be written beside an amount: its ISO code, and its symbol here.
+     *
+     * @return list<string>
+     */
+    private static function currencyNotations(string $locale, MoneyCurrency $currency): array
+    {
+        $code            = $currency->getCode();
+        $numberFormatter = self::currencyFormatter($locale, $code);
+
+        // ICU falls back to the currency of the locale's region for a code it does not know, whose
+        // symbol belongs to a different currency altogether.
+        $symbol = $numberFormatter->getSymbol(NumberFormatter::INTL_CURRENCY_SYMBOL) === $code
+            ? $numberFormatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL)
+            : '';
+
+        return [$code, $symbol];
+    }
+
+    private static function removePrefix(string $value, string $prefix): string
+    {
+        return str_starts_with($value, $prefix) ? substr($value, strlen($prefix)) : $value;
+    }
+
+    private static function removeSuffix(string $value, string $suffix): string
+    {
+        return str_ends_with($value, $suffix) ? substr($value, 0, -strlen($suffix)) : $value;
+    }
+
+    /**
      * Parses a localized number, or returns false unless the whole string is one.
      */
     private static function parseLocalizedNumber(NumberFormatter $numberFormatter, string $value): float|false
@@ -346,17 +693,50 @@ class MoneyFormatter
     private static function getNumberFormatter(
         string $locale,
         int $style,
-        int $decimals = 2,
+        ?int $decimals = null,
+        ?int $significantDigits = null,
         string $numberSuffix = '',
     ): NumberFormatter {
-        $config = config('larapara');
+        $intlCurrencySymbol = (bool) config('larapara.intl_currency_symbol');
 
+        // Building one costs more than everything else a format call does put together, and the same
+        // few combinations come back on every row of a listing. The key carries everything the object
+        // is built from, the config among it, since a formatter that is right for one setting writes
+        // the wrong symbol under the other. Nothing mutates one after it is stored.
+        $key = implode('|', [
+            $locale,
+            $style,
+            $decimals          ?? 'default',
+            $significantDigits ?? 'default',
+            $numberSuffix,
+            (int) $intlCurrencySymbol,
+        ]);
+
+        return self::$numberFormatters[$key] ??= self::buildNumberFormatter(
+            $locale,
+            $style,
+            $decimals,
+            $significantDigits,
+            $numberSuffix,
+            $intlCurrencySymbol,
+        );
+    }
+
+    private static function buildNumberFormatter(
+        string $locale,
+        int $style,
+        ?int $decimals,
+        ?int $significantDigits,
+        string $numberSuffix,
+        bool $intlCurrencySymbol,
+    ): NumberFormatter {
         $numberFormatter = new NumberFormatter($locale, $style);
 
-        $isCurrencyStyle = $style === NumberFormatter::CURRENCY || $style === NumberFormatter::CURRENCY_ACCOUNTING;
-
+        // Decided by the pattern rather than by an enumeration of styles, since ICU has more currency
+        // styles than the two most common ones — cash rounding and the standard variant among them —
+        // and every one of them renders the currency placeholder.
         // Before the decimals, since the pattern carries its own fraction digits.
-        if ($isCurrencyStyle && $config['intl_currency_symbol']) {
+        if ($intlCurrencySymbol && str_contains($numberFormatter->getPattern(), self::CURRENCY_PLACEHOLDER)) {
             $numberFormatter->setPattern(self::intlCurrencyPattern($numberFormatter->getPattern()));
         }
 
@@ -364,9 +744,11 @@ class MoneyFormatter
             $numberFormatter->setPattern(self::numberSuffixPattern($numberFormatter->getPattern(), $numberSuffix));
         }
 
-        if ($decimals < 0) {
-            $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, abs($decimals));
-        } else {
+        // Neither given leaves the digits of the locale in place, which for a plain number is as many
+        // decimals as the value has.
+        if ($significantDigits !== null) {
+            $numberFormatter->setAttribute(NumberFormatter::MAX_SIGNIFICANT_DIGITS, $significantDigits);
+        } elseif ($decimals !== null) {
             $numberFormatter->setAttribute(NumberFormatter::FRACTION_DIGITS, $decimals);
         }
 
@@ -383,7 +765,18 @@ class MoneyFormatter
      */
     private static function intlCurrencyPattern(string $pattern): string
     {
-        return preg_replace('/\x{00A4}+/u', "\u{a4}\u{a4}", $pattern) ?? $pattern;
+        return preg_replace('/\x{00A4}+/u', self::CURRENCY_PLACEHOLDER.self::CURRENCY_PLACEHOLDER, $pattern) ?? $pattern;
+    }
+
+    /**
+     * The locale ICU needs to report the rules of a currency the locale itself does not use.
+     *
+     * An empty locale stands for the default one to every other intl call, but appending a keyword to
+     * it makes an identifier ICU refuses outright, so it is resolved before the keyword goes on.
+     */
+    private static function currencyKeywordLocale(string $locale, string $currencyCode): string
+    {
+        return ($locale === '' ? Locale::getDefault() : $locale).'@currency='.$currencyCode;
     }
 
     /**

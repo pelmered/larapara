@@ -9,7 +9,7 @@ use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
  * @test
  */
 it('can be created from currency code', function (string $code): void {
-    config(['larapara.currencies' => ['USD', 'EUR', 'SEK']]);
+    config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK']]);
 
     $currency = Currency::fromCode($code);
 
@@ -31,7 +31,7 @@ it('throws exception for unsupported currency', function (): void {
  * @test
  */
 it('handles different case inputs', function (): void {
-    config(['larapara.currencies' => ['USD']]);
+    config(['larapara.available_currencies' => ['USD']]);
 
     $currencyLower = Currency::fromCode('usd');
     $currencyUpper = Currency::fromCode('USD');
@@ -46,7 +46,7 @@ it('handles different case inputs', function (): void {
  * @test
  */
 it('maintains case consistency in toString', function (): void {
-    config(['larapara.currencies' => ['USD']]);
+    config(['larapara.available_currencies' => ['USD']]);
 
     $currency = Currency::fromCode('usd');
 

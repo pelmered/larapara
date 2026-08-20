@@ -1,59 +1,55 @@
 <?php
 
+declare(strict_types=1);
+
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Currencies\CurrencyCollection;
+use Pelmered\LaraPara\Currencies\CurrencyRepository;
 
-it('can create a new currency collection', function (): void {
-    $collection = new CurrencyCollection;
-
-    expect($collection)->toBeInstanceOf(CurrencyCollection::class);
-});
-
-it('can transform currencies to select array', function (): void {
-    // Create a collection with sample currency objects
+// toSelectArray() is the only thing this collection adds to Illuminate's, so it is the only thing
+// worth asserting here — the shapes are the ones CurrencyRepository builds.
+it('renders a select array of the currencies it holds', function (): void {
     $collection = new CurrencyCollection([
         'USD' => new Currency('USD', 'US Dollar', 2),
         'EUR' => new Currency('EUR', 'Euro', 2),
         'SEK' => new Currency('SEK', 'Swedish Krona', 2),
     ]);
 
-    $selectArray = $collection->toSelectArray();
-
-    // Check that the transformed array has the expected structure
-    expect($selectArray)
-        ->toBeArray()
-        ->toHaveCount(3)
-        ->toHaveKeys(['USD', 'EUR', 'SEK'])
-        ->and($selectArray['USD'])->toBe('USD - US Dollar')
-        ->and($selectArray['EUR'])->toBe('EUR - Euro')
-        ->and($selectArray['SEK'])->toBe('SEK - Swedish Krona');
+    expect($collection->toSelectArray())->toBe([
+        'USD' => 'USD - US Dollar',
+        'EUR' => 'EUR - Euro',
+        'SEK' => 'SEK - Swedish Krona',
+    ]);
 });
 
-it('returns empty array when collection is empty', function (): void {
-    $collection = new CurrencyCollection;
-
-    $selectArray = $collection->toSelectArray();
-
-    expect($selectArray)
-        ->toBeArray()
-        ->toBeEmpty();
+it('renders an empty select array for an empty collection', function (): void {
+    expect((new CurrencyCollection)->toSelectArray())->toBe([]);
 });
 
-it('maintains collection functionality', function (): void {
-    // Test that the class properly extends Laravel Collection
+// A provider that gives no name for a code leaves it empty, since CurrencyRepository defaults it to ''.
+it('renders a currency that has no name', function (): void {
     $collection = new CurrencyCollection([
-        'USD' => new Currency('USD', 'US Dollar', 2),
-        'EUR' => new Currency('EUR', 'Euro', 2),
+        'BTC' => new Currency('BTC', '', 8),
     ]);
 
-    // Test a few collection methods to ensure inheritance works correctly
-    expect($collection->count())->toBe(2)
-        ->and($collection->has('USD'))->toBeTrue()
-        ->and($collection->has('JPY'))->toBeFalse()
-        ->and($collection->keys()->toArray())->toBe(['USD', 'EUR']);
+    expect($collection->toSelectArray())->toBe(['BTC' => 'BTC - ']);
+});
 
-    // Test adding a new currency
-    $collection->put('JPY', new Currency('JPY', 'Japanese Yen', 0));
-    expect($collection->count())->toBe(3)
-        ->and($collection->has('JPY'))->toBeTrue();
+// The select array is keyed by code, so a list holding the same code twice renders it once.
+it('renders a duplicated code once', function (): void {
+    $collection = new CurrencyCollection([
+        new Currency('USD', 'US Dollar', 2),
+        new Currency('USD', 'United States Dollar', 2),
+    ]);
+
+    expect($collection->toSelectArray())->toBe(['USD' => 'USD - United States Dollar']);
+});
+
+it('renders the select array of the configured registry', function (): void {
+    config(['larapara.available_currencies' => ['USD', 'SEK']]);
+
+    expect(CurrencyRepository::getAvailableCurrencies()->toSelectArray())->toBe([
+        'USD' => 'USD - US Dollar',
+        'SEK' => 'SEK - Swedish Krona',
+    ]);
 });

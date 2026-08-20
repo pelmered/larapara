@@ -12,7 +12,7 @@ beforeEach(function (): void {
 });
 
 it('abbreviates by the magnitude of the amount', function (int $value, string $expectedOutput): void {
-    expect(MoneyFormatter::formatShort($value, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatShortFromMinor($value, Currency::fromCode('USD'), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'thousands'   => [100000, '$1.00K'],
@@ -25,7 +25,7 @@ it('abbreviates by the magnitude of the amount', function (int $value, string $e
 // The threshold and the divisor come from the minor unit of the currency, so formatShort() and
 // format() cannot disagree about the magnitude of the same amount.
 it('abbreviates by the minor unit of the currency', function (string $currency, int $value, string $expectedOutput): void {
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatShort($value, Currency::fromCode($currency), 'en_US')))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor($value, Currency::fromCode($currency), 'en_US')))
         ->toBe($expectedOutput);
 })->with([
     'two minor units'   => ['USD', 123456789, '$1.23M'],
@@ -36,12 +36,12 @@ it('abbreviates by the minor unit of the currency', function (string $currency, 
 ]);
 
 it('formats amounts below a thousand in full', function (string $currency, int $value, string $expectedOutput): void {
-    expect(MoneyFormatter::formatShort($value, Currency::fromCode($currency), 'en_US'))
+    expect(MoneyFormatter::formatShortFromMinor($value, Currency::fromCode($currency), 'en_US'))
         ->toBe($expectedOutput);
 })->with([
     'just below the threshold' => ['USD', 99999, '$999.99'],
     'at the threshold'         => ['USD', 100000, '$1.00K'],
-    'no minor units'           => ['JPY', 999, '¥999.00'],
+    'no minor units'           => ['JPY', 999, '¥999'],
     'zero'                     => ['USD', 0, '$0.00'],
 ]);
 
@@ -51,7 +51,7 @@ it('abbreviates independently of the global number locale', function (): void {
     Number::useLocale('sv');
 
     try {
-        expect(MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'en_US'))
+        expect(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US'))
             ->toBe('$1.23M');
     } finally {
         Number::useLocale('en');
@@ -59,14 +59,14 @@ it('abbreviates independently of the global number locale', function (): void {
 });
 
 it('abbreviates negative amounts', function (): void {
-    expect(MoneyFormatter::formatShort(-123456789, Currency::fromCode('USD'), 'en_US'))
+    expect(MoneyFormatter::formatShortFromMinor(-123456789, Currency::fromCode('USD'), 'en_US'))
         ->toBe('-$1.23M')
-        ->and(MoneyFormatter::formatShort(-123456, Currency::fromCode('USD'), 'en_US'))
+        ->and(MoneyFormatter::formatShortFromMinor(-123456, Currency::fromCode('USD'), 'en_US'))
         ->toBe('-$1.23K');
 });
 
 it('leaves out the currency symbol when asked to, at any magnitude', function (int $value, string $expectedOutput): void {
-    expect(MoneyFormatter::formatShort($value, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
+    expect(MoneyFormatter::formatShortFromMinor($value, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false))
         ->toBe($expectedOutput);
 })->with([
     'abbreviated' => [123456789, '1.23M'],
@@ -81,7 +81,7 @@ it('abbreviates in the digits of the locale', function (string $locale, string $
     $digits    = mb_str_split($expectedDigits);
     $separator = MoneyFormatter::getFormattingRules($locale, $currency)->decimalSeparator;
 
-    expect(MoneyFormatter::formatShort(123456789, $currency, $locale, showCurrencySymbol: false))
+    expect(MoneyFormatter::formatShortFromMinor(123456789, $currency, $locale, showCurrencySymbol: false))
         ->toBe($digits[0].$separator.$digits[1].$digits[2].'M');
 })->with([
     'eastern arabic-indic'  => ['ar_EG', '١٢٣'],
@@ -97,8 +97,8 @@ it('abbreviates in the digits of the locale', function (string $locale, string $
 it('keeps the number intact when the currency symbol is shown', function (string $locale): void {
     $currency = Currency::fromCode('USD');
 
-    expect(MoneyFormatter::formatShort(123456789, $currency, $locale))
-        ->toContain(MoneyFormatter::formatShort(123456789, $currency, $locale, showCurrencySymbol: false));
+    expect(MoneyFormatter::formatShortFromMinor(123456789, $currency, $locale))
+        ->toContain(MoneyFormatter::formatShortFromMinor(123456789, $currency, $locale, showCurrencySymbol: false));
 })->with([
     'ar_EG', 'ar_SA', 'ar', 'ar_MA', 'fa_IR', 'ckb_IQ', 'ps_AF', 'bn_BD', 'bn_IN',
     'mr_IN', 'as_IN', 'dz_BT', 'ne_NP', 'my_MM', 'ur_PK', 'he_IL', 'ja_JP', 'sv_SE', 'de_DE', 'en_US',
@@ -107,7 +107,7 @@ it('keeps the number intact when the currency symbol is shown', function (string
 it('abbreviates with the international currency symbol', function (string $locale, string $expectedOutput): void {
     config(['larapara.intl_currency_symbol' => true]);
 
-    expect(replaceNonBreakingSpaces(MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), $locale)))
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), $locale)))
         ->toBe($expectedOutput);
 })->with([
     'symbol as prefix' => ['en_US', 'USD 1.23M'],
@@ -120,18 +120,25 @@ it('abbreviates with the international currency symbol in a locale with non-lati
     config(['larapara.intl_currency_symbol' => true]);
 
     $currency = Currency::fromCode('USD');
-    $result   = MoneyFormatter::formatShort(123456789, $currency, $locale);
+    $result   = MoneyFormatter::formatShortFromMinor(123456789, $currency, $locale);
 
     expect(substr_count($result, 'USD'))->toBe(1)
-        ->and($result)->toContain(MoneyFormatter::formatShort(123456789, $currency, $locale, showCurrencySymbol: false));
+        ->and($result)->toContain(MoneyFormatter::formatShortFromMinor(123456789, $currency, $locale, showCurrencySymbol: false));
 })->with(['ar_EG', 'fa_IR', 'bn_IN', 'mr_IN', 'dz_BT']);
 
 it('abbreviates with the requested number of decimals', function (int $decimals, string $expectedOutput): void {
-    expect(MoneyFormatter::formatShort(123456789, Currency::fromCode('USD'), 'en_US', decimals: $decimals))
+    expect(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US', decimals: $decimals))
         ->toBe($expectedOutput);
 })->with([
-    'none'               => [0, '$1M'],
-    'one'                => [1, '$1.2M'],
-    'two'                => [2, '$1.23M'],
-    'significant digits' => [-3, '$1.23M'],
+    'none' => [0, '$1M'],
+    'one'  => [1, '$1.2M'],
+    'two'  => [2, '$1.23M'],
+]);
+
+it('abbreviates to a number of significant digits', function (int $significantDigits, string $expectedOutput): void {
+    expect(MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US', significantDigits: $significantDigits))
+        ->toBe($expectedOutput);
+})->with([
+    'one'   => [1, '$1M'],
+    'three' => [3, '$1.23M'],
 ]);
