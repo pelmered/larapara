@@ -548,15 +548,29 @@ it('refuses a currency code this configuration does not support', function (): v
         ->toThrow(UnsupportedCurrency::class);
 });
 
-// A code carries the minor unit of a currency ICU knows nothing about, where a Money currency does not.
-it('reads a currency outside ISO 4217 from its code', function (): void {
+// The minor unit of a currency ICU knows nothing about comes from the registry, which is reached by
+// the code — so every way of naming the same currency reads the same amount. A Money currency used
+// to be read at two decimals here, which is the same amount a factor of a million out.
+it('reads a currency outside ISO 4217 the same however it is named', function (string $shape): void {
     config([
         'larapara.load_crypto_currencies' => true,
         'larapara.available_currencies'   => ['USD', 'BTC'],
     ]);
 
-    expect(MoneyFormatter::parseToMoney('1.00000000', 'BTC', 'en_US')?->getAmount())->toBe('100000000')
-        ->and(MoneyFormatter::parseToMoney('1.00000000', new MoneyCurrency('BTC'), 'en_US')?->getAmount())->toBe('100');
+    // Built here rather than in the dataset, which is resolved before the currency is available.
+    $currency = match ($shape) {
+        'a code'           => 'BTC',
+        'a currency'       => Currency::fromCode('BTC'),
+        'a money currency' => new MoneyCurrency('BTC'),
+    };
+
+    expect(MoneyFormatter::parseToMoney('1.00000000', $currency, 'en_US')?->getAmount())->toBe('100000000');
+})->with(['a code', 'a currency', 'a money currency']);
+
+// Nothing knows the minor unit of a code no currency list has, so two decimals is the only guess
+// left — and guessing is better than refusing an amount the caller built a Money for deliberately.
+it('reads a currency no list knows at two decimals', function (): void {
+    expect(MoneyFormatter::parseToMoney('1.00', new MoneyCurrency('XBT'), 'en_US')?->getAmount())->toBe('100');
 });
 
 it('reads nothing as nothing', function (?string $value): void {

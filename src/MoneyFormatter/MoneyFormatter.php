@@ -476,8 +476,28 @@ class MoneyFormatter
             return max($isoCurrencies->subunitFor($moneyCurrency), 0);
         }
 
-        // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data.
-        return $currency instanceof Currency ? max($currency->minorUnit ?? 2, 0) : 2;
+        // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data —
+        // read from the registry for a bare Money\Currency, which carries a code and nothing else.
+        // Otherwise the same code means eight decimals as a Currency and two as a Money\Currency,
+        // and the amount a call renders would depend on which object the caller happened to hold.
+        $minorUnit = $currency instanceof Currency
+            ? $currency->minorUnit
+            : self::registeredMinorUnit($moneyCurrency);
+
+        return max($minorUnit ?? 2, 0);
+    }
+
+    /**
+     * The minor unit the registry holds for a code, or null where this configuration has no such
+     * currency and there is nothing left to read it from.
+     */
+    private static function registeredMinorUnit(MoneyCurrency $currency): ?int
+    {
+        try {
+            return Currency::fromCode($currency->getCode())->minorUnit;
+        } catch (UnsupportedCurrency) {
+            return null;
+        }
     }
 
     /**

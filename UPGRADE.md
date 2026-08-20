@@ -211,6 +211,15 @@ also fixes the `MoneyString` validation rule, which raised `UnknownCurrencyExcep
 for a crypto currency instead of reporting a validation failure. Formatting *with* a symbol still throws:
 ICU has no symbol to give.
 
+## A currency's minor unit is read from its code
+
+Only a LaraPara `Currency` carried a minor unit, so a bare `Money\Currency` outside ISO 4217 was read at
+two decimals: `parseToMoney('1.00000000', new Money\Currency('BTC'), 'en_US')` gave 100 minor units where
+the same call with `'BTC'` gave 100000000 — the same amount a factor of a million apart, decided by which
+object the caller happened to hold. The code is looked up in the registry now, so every way of naming a
+currency reads and writes the same amount. A code no currency list has still falls back to two decimals,
+since nothing knows any better.
+
 ## The currency column is never nullable
 
 All four column macros write the currency column as `NOT NULL`, defaulting to `default_currency`, where
