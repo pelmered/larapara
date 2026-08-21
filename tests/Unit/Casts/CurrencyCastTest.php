@@ -3,6 +3,7 @@
 namespace Pelmered\LaraPara\Tests\Unit\Casts;
 
 use Money\Currency as MoneyCurrency;
+use Pelmered\LaraPara\Casts\CurrencyCast;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\Tests\Support\Models\Post;
@@ -130,3 +131,30 @@ it('serializes a currency as its code', function (): void {
         ->and(json_decode($model->toJson(), true)['price_currency'])->toBe('SEK')
         ->and(json_encode($model->price_currency))->toBe('"SEK"');
 });
+
+// get() hands back a \Money\Currency unvalidated where the configuration asks for one, so
+// serialize() reads the code of the object it is given rather than resolving it a second time: it
+// threw for a code the configuration no longer lists, failing to serialize a value it had just
+// handed out, and paid a registry lookup per serialized attribute per row to do it.
+it('serializes a code the configuration no longer lists', function (): void {
+    config(['larapara.currency_cast_to' => MoneyCurrency::class]);
+
+    $cast     = new CurrencyCast;
+    $model    = new Post;
+    $currency = $cast->get($model, 'price_currency', 'GBP', []);
+
+    expect($currency)->toBeInstanceOf(MoneyCurrency::class)
+        ->and($cast->serialize($model, 'price_currency', $currency, []))->toBe('GBP');
+});
+
+// The code carried by the object get() built, whatever the configuration casts to.
+it('serializes the currency the configuration casts to', function (string $castTo, string $code): void {
+    config(['larapara.currency_cast_to' => $castTo]);
+
+    $model = (new Post)->newFromBuilder(['price' => 123456, 'price_currency' => $code]);
+
+    expect($model->toArray()['price_currency'])->toBe($code);
+})->with([
+    'currency'       => [Currency::class, 'SEK'],
+    'money currency' => [MoneyCurrency::class, 'SEK'],
+]);

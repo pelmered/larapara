@@ -42,7 +42,19 @@ class CurrencyCast implements CastsAttributes
     #[Param(attributes: 'array<string, mixed>')]
     public function serialize(Model $model, string $key, mixed $value, array $attributes): ?string
     {
-        return $value === null ? null : Currency::toCode($value);
+        if ($value === null) {
+            return null;
+        }
+
+        // The code of the object get() built, read rather than resolved a second time: get() hands
+        // back a \Money\Currency unvalidated where the configuration asks for one, so resolving it
+        // here would throw for a stored code this configuration no longer lists — a row that reads
+        // cleanly would fail on toArray(), and every serialized attribute would cost a lookup.
+        if ($value instanceof Currency || $value instanceof \Money\Currency) {
+            return (string) $value;
+        }
+
+        return Currency::toCode($value);
     }
 
     /**
