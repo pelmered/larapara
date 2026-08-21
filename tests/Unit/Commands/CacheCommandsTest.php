@@ -30,6 +30,10 @@ test('clear cache command runs successfully', function (): void {
     config(['larapara.currency_cache.type' => 'remember']);
     config(['larapara.currency_cache.ttl' => '500']);
 
+    // Cleared before it is filled, since the currencies are memoized for the life of the process:
+    // a read only reaches the cache store when the memo has nothing for this configuration.
+    CurrencyRepository::clearCache();
+
     $currencies = CurrencyRepository::getAvailableCurrencies();
 
     expect(Cache::has('larapara_currencies'))->toBeTrue();

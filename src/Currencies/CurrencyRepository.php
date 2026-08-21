@@ -14,6 +14,7 @@ use Pelmered\LaraPara\Exceptions\InvalidConfiguration;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
+use PhpStaticAnalysis\Attributes\Type;
 
 class CurrencyRepository
 {
@@ -33,6 +34,19 @@ class CurrencyRepository
      * enabled" means: any other type resolves the currencies uncached.
      */
     private const CACHE_TYPES = ['remember', 'flexible', 'forever'];
+
+    /**
+     * The currencies as this process last built them, and the configuration they were built from.
+     *
+     * The read path asks for the currencies once or twice per row — MoneyCast::get() resolves the
+     * scale of every amount through them — so without this a thousand rows with two money columns
+     * is a thousand round trips to the cache store, or a thousand rebuilds of the ISO list and the
+     * crypto one where the cache is off.
+     */
+    private static ?CurrencyCollection $memo = null;
+
+    #[Type('list<mixed>|null')]
+    private static ?array $memoConfig = null;
 
     /**
      * Whether getAvailableCurrencies() writes through the cache — the same question money:cache
@@ -63,6 +77,15 @@ class CurrencyRepository
 
     public static function getAvailableCurrencies(): CurrencyCollection
     {
+        // Compared against the configuration the list was built from rather than kept for the life
+        // of the process outright, since changing that configuration — which an application may do
+        // per tenant, and the tests do constantly — has to build the list it now asks for.
+        $memoConfig = static::memoConfig();
+
+        if (self::$memo instanceof CurrencyCollection && self::$memoConfig === $memoConfig) {
+            return self::$memo;
+        }
+
         $config = Config::get('larapara.currency_cache', []);
         $ttl    = data_get($config, 'ttl', 0);
 
@@ -74,16 +97,37 @@ class CurrencyRepository
         // everything is a string, and each type takes a different shape of it. Passing the wrong
         // shape does not fail loudly — a string TTL is read one character at a time and an array one
         // becomes the int 1, so the cache quietly lives for seconds instead of months.
-        return match (data_get($config, 'type')) {
+        $currencies = match (data_get($config, 'type')) {
             'remember' => Cache::remember(static::CACHE_KEY, static::secondsTtl($ttl), $callback),
             'flexible' => Cache::flexible(static::CACHE_KEY, static::flexibleTtl($ttl), $callback),
             'forever'  => Cache::rememberForever(static::CACHE_KEY, $callback),
             default    => $callback(),
         };
+
+        self::$memoConfig = $memoConfig;
+
+        return self::$memo = $currencies;
+    }
+
+    /**
+     * The configuration the currency list is built from, which is what makes a memoized one stale.
+     */
+    #[Returns('list<mixed>')]
+    protected static function memoConfig(): array
+    {
+        return [
+            Config::get('larapara.currency_provider'),
+            Config::get('larapara.available_currencies'),
+            Config::get('larapara.excluded_currencies'),
+            Config::get('larapara.load_crypto_currencies'),
+        ];
     }
 
     public static function clearCache(): void
     {
+        self::$memo       = null;
+        self::$memoConfig = null;
+
         Cache::forget(static::CACHE_KEY);
 
         // The flexible type keeps the age of the entry under a companion key of its own.

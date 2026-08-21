@@ -1035,6 +1035,13 @@ They are also wired into Laravel's optimization commands, so `php artisan optimi
 
 Set `MONEY_CURRENCY_CACHE=false` to disable caching, for example while developing a custom provider.
 
+Within a single process the list is also held in memory, since reading a money attribute resolves the
+scale of its amount through it — a page of a thousand rows would otherwise be a thousand round trips to
+the cache store. It is held against the configuration it was built from, so changing
+`available_currencies`, `excluded_currencies`, `load_crypto_currencies` or `currency_provider` at
+runtime builds the list that configuration asks for. `CurrencyRepository::clearCache()` drops it, which
+is what `money:clear` and `money:cache` both call.
+
 ## Using LaraPara with Filament
 
 LaraPara has no Filament dependency. If you want localized money input fields, table columns and infolist
