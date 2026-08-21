@@ -161,6 +161,7 @@ class MoneyCast implements CastsAttributes
      * currencies, so the zeros it pads a shorter amount with are dropped again here.
      */
     #[Returns('numeric-string')]
+    #[Throws(InvalidAmount::class)]
     protected function fromDecimal(string $value, string $currency): string
     {
         $minorUnit = $this->getDecimals($currency);
@@ -175,7 +176,10 @@ class MoneyCast implements CastsAttributes
             $digits = ltrim($whole.str_pad($fraction, $minorUnit, '0'), '0');
             $amount = $digits === '' ? '0' : $sign.$digits;
 
-            if (is_numeric($amount)) {
+            // Digits, and not merely numeric: exponent notation is numeric and pads to a digit
+            // string that is not — "1E+25" becomes "1E+2500" — which Money refuses a character at a
+            // time rather than reading. The reading below is the one written for that notation.
+            if (($digits === '' || ctype_digit($digits)) && is_numeric($amount)) {
                 return $amount;
             }
         }
@@ -183,7 +187,15 @@ class MoneyCast implements CastsAttributes
         // Not a plain decimal carrying the decimals of its currency: a float in exponent notation
         // from a driver that hands one back, or a row written by hand with more decimals than the
         // currency has. Read as the number it is, which rounds rather than reads the amount short.
-        return (string) (int) round((float) $value * 10 ** $minorUnit);
+        $minorAmount = round((float) $value * 10 ** $minorUnit);
+
+        // Cast beyond the integer range, the amount wraps to an unrelated — usually negative — one,
+        // so a column holding more than this cast can read says so instead of reading it wrongly.
+        if (! is_finite($minorAmount) || abs($minorAmount) >= (float) PHP_INT_MAX) {
+            throw InvalidAmount::exceedsIntegerRange($value, $currency);
+        }
+
+        return (string) (int) $minorAmount;
     }
 
     public function getDecimals(string $currencyCode): int

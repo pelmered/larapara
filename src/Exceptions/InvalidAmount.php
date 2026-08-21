@@ -17,6 +17,15 @@ class InvalidAmount extends InvalidArgumentException
         );
     }
 
+    public static function exceedsIntegerRange(string $value, string $currency): self
+    {
+        return new self(
+            'The stored amount "'.$value.'" in '.$currency.' is more minor units than an integer holds, so it '
+            .'cannot be read back as the amount it is. Store amounts this large as a string in a column of their '
+            .'own, or in a currency whose minor unit needs fewer digits.'
+        );
+    }
+
     public static function notMinorUnits(string $value): self
     {
         return new self(

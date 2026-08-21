@@ -399,3 +399,39 @@ it('takes the scale as a cast parameter', function (): void {
 
     expect($model->getAttributes()['price'])->toBe('1.23456789');
 });
+
+// A driver is free to hand back a decimal column as a float in exponent notation, and the reading
+// written for that notation was unreachable: the guard above it asked is_numeric(), which exponent
+// notation satisfies, so "1E+25" was padded to the digit string "1E+2500" and handed to Money —
+// which refused it a character at a time rather than reading the amount.
+it('reads a column handed back in exponent notation', function (string $column, string $expectedAmount): void {
+    config([
+        'larapara.store.format'         => 'decimal',
+        'larapara.available_currencies' => ['USD'],
+    ]);
+
+    $model                 = new TestModel;
+    $model->price_currency = 'USD';
+
+    expect((new MoneyCast)->get($model, 'price', $column, [])->getAmount())->toBe($expectedAmount);
+})->with([
+    'a whole number of units'     => ['1E+3', '100000'],
+    'lower case, with a fraction' => ['1.5e3', '150000'],
+    'a negative exponent'         => ['1.2E-1', '12'],
+    'negative'                    => ['-1E+3', '-100000'],
+]);
+
+// Read through a float, an amount past the integer range wrapped to an unrelated negative one, so a
+// column holding more than the cast can read handed back a plausible-looking wrong amount.
+it('refuses a column holding more minor units than an integer', function (): void {
+    config([
+        'larapara.store.format'         => 'decimal',
+        'larapara.available_currencies' => ['USD'],
+    ]);
+
+    $model                 = new TestModel;
+    $model->price_currency = 'USD';
+
+    expect(fn (): ?Money => (new MoneyCast)->get($model, 'price', '1.0E+25', []))
+        ->toThrow(InvalidAmount::class);
+});
