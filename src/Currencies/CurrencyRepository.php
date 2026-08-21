@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Pelmered\LaraPara\Currencies\Providers\CryptoCurrenciesProvider;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
+use Pelmered\LaraPara\Exceptions\InvalidConfiguration;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
@@ -120,7 +121,7 @@ class CurrencyRepository
     }
 
     #[Throws(BindingResolutionException::class)]
-    #[Throws(UnsupportedCurrency::class)]
+    #[Throws(InvalidConfiguration::class)]
     protected static function loadAvailableCurrencies(): CurrencyCollection
     {
         $currencyProvider    = Config::get('larapara.currency_provider', ISOCurrenciesProvider::class);
@@ -161,7 +162,11 @@ class CurrencyRepository
                     $currencyCode = static::normalizeCode($currencyCode);
 
                     if (! array_key_exists($currencyCode, $currencies)) {
-                        throw new UnsupportedCurrency($currencyCode);
+                        // The configuration is wrong, rather than the code being unsupported: every
+                        // caller asking whether a code is supported catches UnsupportedCurrency to
+                        // answer no, so raising that here made one typo in available_currencies
+                        // report every currency — including the ones spelled correctly — as invalid.
+                        throw InvalidConfiguration::unknownCurrency($currencyCode);
                     }
 
                     return [

@@ -314,7 +314,7 @@ If your application writes a currency it does not list — a crypto code without
 ## `available_currencies` is normalized
 
 Codes from the config are trimmed and upper-cased before use, so `MONEY_AVAILABLE_CURRENCIES="USD, EUR"`
-works. A code the currency provider does not know now throws `UnsupportedCurrency` naming that code,
+works. A code the currency provider does not know now throws `InvalidConfiguration` naming that code,
 instead of `ErrorException: Undefined array key` on the first currency read.
 
 ## Formatting refuses an amount that is not whole minor units
@@ -352,6 +352,18 @@ throws `UnsupportedCurrency` on the first read of the row, naming the code. If y
 reading codes the configuration does not list, add them to `available_currencies` (or a custom
 `currency_provider`). A stored code is also normalized on the way out now, so a column holding `'sek'`
 reads back as `'SEK'`.
+
+## A misconfigured `available_currencies` entry throws `InvalidConfiguration`
+
+A code in `available_currencies` that the currency provider does not have raised
+`UnsupportedCurrency`, which is also what "this code is not one of the configured currencies" means —
+and every caller asking that question catches it to answer no. So one typo made
+`CurrencyRepository::isValidCode()` return `false` for every code, and the `SupportedCurrency` rule
+report a correctly spelled `USD` as unsupported, with nothing naming the entry that was wrong.
+
+That case now throws `Pelmered\LaraPara\Exceptions\InvalidConfiguration`, which no such caller
+catches, so it reaches you naming the entry. Catch it alongside `UnsupportedCurrency` if you were
+handling a misconfigured registry yourself; both extend `RuntimeException`.
 
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 

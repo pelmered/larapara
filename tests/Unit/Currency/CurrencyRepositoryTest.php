@@ -8,7 +8,9 @@ use Pelmered\LaraPara\Currencies\CurrencyCollection;
 use Pelmered\LaraPara\Currencies\CurrencyRepository;
 use Pelmered\LaraPara\Currencies\Providers\CurrenciesProvider;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
+use Pelmered\LaraPara\Exceptions\InvalidConfiguration;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
+use Pelmered\LaraPara\Rules\SupportedCurrency;
 
 class LowerCasedCurrenciesProvider implements CurrenciesProvider
 {
@@ -227,11 +229,30 @@ it('refuses a configured currency the provider does not know', function (mixed $
     Config::set('larapara.available_currencies', $availableCurrencies);
 
     expect(fn (): CurrencyCollection => CurrencyRepository::getAvailableCurrencies())
-        ->toThrow(UnsupportedCurrency::class);
+        ->toThrow(InvalidConfiguration::class);
 })->with([
     'unknown code'          => [['USD', 'XXY']],
     'crypto without crypto' => [['USD', 'BTC']],
 ]);
+
+// A misconfigured entry used to raise UnsupportedCurrency, which is what "this code is not one of
+// the configured currencies" means and what every caller asking that question catches to answer no:
+// one typo in available_currencies reported every currency in the registry as invalid, USD included,
+// with nothing anywhere naming the entry that was wrong.
+it('does not report every currency as invalid for one misconfigured entry', function (): void {
+    Config::set('larapara.available_currencies', ['USD', 'EUR', 'XYZ']);
+
+    expect(fn (): bool => CurrencyRepository::isValidCode('USD'))
+        ->toThrow(InvalidConfiguration::class, 'XYZ');
+});
+
+it('names the misconfigured entry when a rule validates a currency', function (): void {
+    Config::set('larapara.available_currencies', ['USD', 'EUR', 'XYZ']);
+
+    expect(function (): void {
+        (new SupportedCurrency)->validate('currency', 'USD', function (): void {});
+    })->toThrow(InvalidConfiguration::class, 'XYZ');
+});
 
 it('takes the currency codes of a provider that keys them differently', function (): void {
     Config::set('larapara.currency_provider', LowerCasedCurrenciesProvider::class);
