@@ -409,17 +409,19 @@ class MoneyFormatter
     /**
      * The currency data a formatter or a parser places the decimal point by.
      *
-     * ISO 4217 first, since it is authoritative for the currencies it covers, with the minor unit of
-     * the currency in hand behind it — otherwise a currency ISO has never heard of throws an
-     * exception that is neither a parse failure a caller can catch nor anything ICU could not have
-     * rendered: ICU writes the code as the symbol for a currency it has no symbol for.
+     * The minor unit in hand first, since getMinorUnit() has already decided it and this is the same
+     * scale the amount was measured in: ISO ahead of it overrode a provider's scale for its own
+     * currencies, so an amount counted in four decimals was written and read in two. ISO stays
+     * behind it for every other currency, since a currency neither knows throws an exception that is
+     * neither a parse failure a caller can catch nor anything ICU could not have rendered: ICU
+     * writes the code as the symbol for a currency it has no symbol for.
      */
     #[Param(minorUnit: 'int<0, max>')]
     private static function currenciesFor(MoneyCurrency $currency, int $minorUnit): Currencies
     {
         return new AggregateCurrencies([
-            new ISOCurrencies,
             new CurrencyList([$currency->getCode() => $minorUnit]),
+            new ISOCurrencies,
         ]);
     }
 
@@ -521,26 +523,36 @@ class MoneyFormatter
 
     /**
      * The minor unit of the currency, which is how many decimals its amounts carry.
+     *
+     * The currency's own first, so the configured provider decides the scale of the currencies it
+     * supplies — a crypto currency, which ISO 4217 has never heard of, and equally an ISO one the
+     * provider deliberately gives a different scale. ISO is where a minor unit comes from when
+     * nothing else names it, not a rule the configuration cannot reach.
      */
     #[Returns('int<0, max>')]
     public static function getMinorUnit(Currency|MoneyCurrency $currency): int
     {
-        $isoCurrencies = new ISOCurrencies;
         $moneyCurrency = self::asMoneyCurrency($currency);
 
-        if ($isoCurrencies->contains($moneyCurrency)) {
-            return max($isoCurrencies->subunitFor($moneyCurrency), 0);
-        }
-
-        // Crypto currencies are not part of ISO 4217, so their minor unit comes from our own data —
-        // read from the registry for a bare Money\Currency, which carries a code and nothing else.
-        // Otherwise the same code means eight decimals as a Currency and two as a Money\Currency,
+        // Read from the registry for a bare Money\Currency, which carries a code and nothing else:
+        // otherwise the same code means eight decimals as a Currency and two as a Money\Currency,
         // and the amount a call renders would depend on which object the caller happened to hold.
         $minorUnit = $currency instanceof Currency
             ? $currency->minorUnit
             : self::registeredMinorUnit($moneyCurrency);
 
-        return max($minorUnit ?? 2, 0);
+        if ($minorUnit !== null) {
+            return max($minorUnit, 0);
+        }
+
+        $isoCurrencies = new ISOCurrencies;
+
+        // A currency built by hand carries no minor unit, and the registry has none for a code it
+        // does not list, so ISO answers for both — and two decimals for a code even it has never
+        // heard of, which is what most currencies carry.
+        return $isoCurrencies->contains($moneyCurrency)
+            ? max($isoCurrencies->subunitFor($moneyCurrency), 0)
+            : 2;
     }
 
     /**

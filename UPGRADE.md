@@ -365,6 +365,20 @@ That case now throws `Pelmered\LaraPara\Exceptions\InvalidConfiguration`, which 
 catches, so it reaches you naming the entry. Catch it alongside `UnsupportedCurrency` if you were
 handling a misconfigured registry yourself; both extend `RuntimeException`.
 
+## A currency provider decides the minor unit of the currencies it supplies
+
+`getMinorUnit()` consulted ISO 4217 before the configured registry, so a custom `currency_provider`
+was honoured for a currency's existence and its name but not for its scale: a provider declaring USD
+with four decimals — what per-unit pricing needs — still formatted, parsed and stored amounts two
+decimals wide. The same ordering sat inside the currency data handed to the money library, so even an
+explicit minor unit lost to ISO there.
+
+The currency's own minor unit now wins, with ISO 4217 behind it for a currency that names none — one
+built by hand, or a code the registry does not list. Nothing changes for the bundled providers, which
+carry the ISO minor units already. If you supply a provider that disagrees with ISO on a currency's
+scale, note that this now reaches storage: `MoneyCast` reads its scale through the same resolver, so
+check `store.decimal_scale` and your column against it.
+
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
 - The whole string has to be accounted for. `'1.2.3'`, `'0x1A'`, `'NaN'` and `'12 dollars'` now throw
