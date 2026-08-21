@@ -14,6 +14,11 @@ class CacheCommand extends Command
 
     public function handle(): void
     {
+        // Cleared first, since the read below writes through the cache only on a miss: an entry the
+        // `flexible` type still counts as fresh would be returned as it stands, and the command
+        // would report the currencies from before the configuration changed as the ones it cached.
+        CurrencyRepository::clearCache();
+
         $currencies = CurrencyRepository::getAvailableCurrencies();
 
         if (CurrencyRepository::isCacheEnabled()) {
