@@ -77,6 +77,7 @@ class MoneyCast implements CastsAttributes
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]
     #[Returns('int|null')]
+    #[Throws(InvalidAmount::class)]
     protected function getAmount(Model $model, string $key, Money|array|int|string|null $value): ?int
     {
         $amount = match (true) {
@@ -85,7 +86,14 @@ class MoneyCast implements CastsAttributes
             default                 => $value,
         };
 
-        return $amount !== null ? (int) $amount : null;
+        if ($amount === null) {
+            return null;
+        }
+
+        // By the formatter's rule rather than by a second one here, since both are given the same
+        // amounts: (int) read "1234.56" as 1234 and stored $12.34 for the amount whoever wrote it
+        // meant, which is the value the formatter refuses outright.
+        return (int) MoneyFormatter::toMinorUnits($amount);
     }
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]

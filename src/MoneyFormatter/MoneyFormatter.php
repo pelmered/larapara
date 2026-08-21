@@ -613,10 +613,14 @@ class MoneyFormatter
 
     /**
      * Amounts are whole minor units. Anything else is a mistake we should not silently truncate.
+     *
+     * Public because the casts hold the same rule from the other side: the amount a column is given
+     * is the amount a formatter is given, and two readings of what counts as one would let the
+     * cast store "1234.56" as $12.34 while the formatter refuses to render it at all.
      */
     #[Returns('int|numeric-string')]
     #[Throws(InvalidAmount::class)]
-    private static function toMinorUnits(int|string $value): int|string
+    public static function toMinorUnits(int|string $value): int|string
     {
         if (is_int($value)) {
             return $value;

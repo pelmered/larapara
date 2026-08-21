@@ -435,3 +435,31 @@ it('refuses a column holding more minor units than an integer', function (): voi
     expect(fn (): ?Money => (new MoneyCast)->get($model, 'price', '1.0E+25', []))
         ->toThrow(InvalidAmount::class);
 });
+
+// An amount is whole minor units, and a decimal string was cast to an int instead: '1234.56' was
+// read as 1234 and stored as $12.34, the amount nobody meant, while the formatter refuses the same
+// string outright. The two are given the same amounts, so they answer the same way.
+it('refuses an amount that is not whole minor units', function (mixed $value): void {
+    $model = new TestModel;
+
+    expect(fn (): array => (new MoneyCast)->set($model, 'price', $value, []))
+        ->toThrow(InvalidAmount::class);
+})->with([
+    'a decimal string'        => ['1234.56'],
+    'a decimal string, minor' => ['0.5'],
+    'exponent notation'       => ['1.2E+3'],
+    'not a number at all'     => ['twelve'],
+    'in the array form'       => [['amount' => '1234.56', 'currency' => 'USD']],
+]);
+
+it('takes an amount in minor units however it is written', function (mixed $value, int $expected): void {
+    $model = new TestModel;
+
+    expect((new MoneyCast)->set($model, 'price', $value, [])['price'])->toBe($expected);
+})->with([
+    'an int'            => [123456, 123456],
+    'a string'          => ['123456', 123456],
+    'a padded string'   => [' 123456 ', 123456],
+    'a negative string' => ['-123456', -123456],
+    'zero'              => ['0', 0],
+]);

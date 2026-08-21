@@ -256,6 +256,11 @@ $product->price = ['amount' => 5000, 'currency' => 'EUR'];
 $product->price = 5000; // Currency from the model's currency column, or the default currency
 ```
 
+A plain amount is whole minor units, as an int or a numeric string. Anything else — `'1234.56'`,
+`'twelve'` — throws `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than storing the int it
+casts to, which is the same rule the formatter holds. An amount a person typed is read by
+[`parseToMoney()`](#parsetomoney), which knows the scale of the currency.
+
 Currency codes are validated and upper-cased as they are written, by both casts. Writing a currency that
 `available_currencies` does not list throws `Pelmered\LaraPara\Exceptions\UnsupportedCurrency`, since
 reading such a row back would throw the same exception.

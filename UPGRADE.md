@@ -323,6 +323,22 @@ Formatting cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not
 Anything that is not whole minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`. If you
 were passing a major-unit amount, multiply it by the minor unit first, or use `formatNumber()`.
 
+## Storing an amount refuses what is not whole minor units
+
+`MoneyCast` cast its input to an int, the way formatting used to, so `$post->price = '1234.56'` stored
+1234 — $12.34 for the amount that was written — and `'twelve'` stored 0. An amount that is not whole
+minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`, the same rule the formatter
+holds, since both are given the same amounts:
+
+```php
+$post->price = 123456;      // unchanged
+$post->price = '123456';    // unchanged: a numeric string of minor units
+$post->price = '1234.56';   // InvalidAmount, where it used to store 1234
+
+// A major-unit amount from a request is read by the parser, which knows the currency's scale:
+$post->price = MoneyFormatter::parseToMoney($request->input('price'), $currency, app()->getLocale());
+```
+
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
 - The whole string has to be accounted for. `'1.2.3'`, `'0x1A'`, `'NaN'` and `'12 dollars'` now throw
