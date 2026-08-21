@@ -138,6 +138,9 @@ return [
     | Supported values are:
     | - 'Pelmered\LaraPara\Currencies\Currency::class' (default and recommended)
     | - 'Money\Currency::class'
+    |
+    | This chooses the object a read hands back, not whether the code is validated: either way a
+    | code 'available_currencies' does not list throws UnsupportedCurrency when the row is read.
     */
     'currency_cast_to' => env('MONEY_CURRENCY_CAST', Currency::class),
 ];

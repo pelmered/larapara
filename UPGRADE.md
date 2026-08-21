@@ -339,6 +339,20 @@ $post->price = '1234.56';   // InvalidAmount, where it used to store 1234
 $post->price = MoneyFormatter::parseToMoney($request->input('price'), $currency, app()->getLocale());
 ```
 
+## `currency_cast_to` chooses the object, not whether the code is validated
+
+With `currency_cast_to = Money\Currency::class`, `CurrencyCast` built the object straight from the
+column and validated nothing. A row holding a code `available_currencies` does not list therefore read
+cleanly and failed later, out of `CurrencyCast::set()` — which Eloquent calls to merge a cast attribute
+back into the model — so `toArray()`, `save()` and `getAttributes()` threw on a row whose attribute was
+fine, and the exception came from the write path of a read.
+
+Both casts now resolve the code through the registry, as `Currency::class` always did: an unlisted code
+throws `UnsupportedCurrency` on the first read of the row, naming the code. If you were relying on
+reading codes the configuration does not list, add them to `available_currencies` (or a custom
+`currency_provider`). A stored code is also normalized on the way out now, so a column holding `'sek'`
+reads back as `'SEK'`.
+
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
 - The whole string has to be accounted for. `'1.2.3'`, `'0x1A'`, `'NaN'` and `'12 dollars'` now throw

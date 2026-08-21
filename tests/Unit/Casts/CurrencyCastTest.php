@@ -132,20 +132,44 @@ it('serializes a currency as its code', function (): void {
         ->and(json_encode($model->price_currency))->toBe('"SEK"');
 });
 
-// get() hands back a \Money\Currency unvalidated where the configuration asks for one, so
 // serialize() reads the code of the object it is given rather than resolving it a second time: it
-// threw for a code the configuration no longer lists, failing to serialize a value it had just
-// handed out, and paid a registry lookup per serialized attribute per row to do it.
-it('serializes a code the configuration no longer lists', function (): void {
+// threw for a currency the configuration does not list, failing to serialize a value it had been
+// handed, and paid a registry lookup per serialized attribute per row to do it.
+it('serializes a currency it is handed without resolving it', function (): void {
     config(['larapara.currency_cast_to' => MoneyCurrency::class]);
 
-    $cast     = new CurrencyCast;
-    $model    = new Post;
-    $currency = $cast->get($model, 'price_currency', 'GBP', []);
-
-    expect($currency)->toBeInstanceOf(MoneyCurrency::class)
-        ->and($cast->serialize($model, 'price_currency', $currency, []))->toBe('GBP');
+    expect((new CurrencyCast)->serialize(new Post, 'price_currency', new MoneyCurrency('GBP'), []))
+        ->toBe('GBP');
 });
+
+// The code was read into a \Money\Currency straight from the column, so a row holding a code
+// available_currencies does not list read cleanly and threw later, out of set(), which Eloquent
+// calls to merge a cast attribute back: toArray(), save() and getAttributes() all failed on a row
+// whose attribute was fine, and the exception came from the write path of a read.
+it('refuses a code the configuration does not know in either cast', function (string $castTo): void {
+    config(['larapara.currency_cast_to' => $castTo]);
+
+    $model = (new Post)->newFromBuilder(['price' => 123456, 'price_currency' => 'GBP']);
+
+    expect(fn (): mixed => $model->price_currency)->toThrow(UnsupportedCurrency::class);
+})->with([
+    'currency'       => [Currency::class],
+    'money currency' => [MoneyCurrency::class],
+]);
+
+// The registry is what a code is read through now, so a column written before the codes were
+// normalized reads back as the code this configuration spells.
+it('normalizes a code the column spells differently', function (string $castTo): void {
+    config(['larapara.currency_cast_to' => $castTo]);
+
+    $model = (new Post)->newFromBuilder(['price' => 123456, 'price_currency' => 'sek']);
+
+    expect($model->price_currency->getCode())->toBe('SEK')
+        ->and($model->toArray()['price_currency'])->toBe('SEK');
+})->with([
+    'currency'       => [Currency::class],
+    'money currency' => [MoneyCurrency::class],
+]);
 
 // The code carried by the object get() built, whatever the configuration casts to.
 it('serializes the currency the configuration casts to', function (string $castTo, string $code): void {

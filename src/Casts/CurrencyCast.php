@@ -26,9 +26,16 @@ class CurrencyCast implements CastsAttributes
             return null;
         }
 
+        // Resolved through the registry whichever object the configuration asks for, since
+        // `currency_cast_to` chooses the type a read hands back and not whether the code is one this
+        // configuration knows. Built straight from the column, a code available_currencies does not
+        // list read cleanly and then threw out of set(), which Eloquent calls to merge a cast
+        // attribute back into the model — a write validator failing on what a read had handed out.
+        $currency = Currency::fromCode($value);
+
         return match (config('larapara.currency_cast_to')) {
-            \Money\Currency::class => new \Money\Currency($value),
-            default                => Currency::fromCode($value)
+            \Money\Currency::class => $currency->toMoneyCurrency(),
+            default                => $currency,
         };
     }
 
