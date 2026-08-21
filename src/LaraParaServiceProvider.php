@@ -8,6 +8,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\ColumnDefinition;
 use Pelmered\LaraPara\Commands\CacheCommand;
 use Pelmered\LaraPara\Commands\ClearCacheCommand;
+use Pelmered\LaraPara\Exceptions\InvalidColumnScale;
+use PhpStaticAnalysis\Attributes\Throws;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -101,6 +103,7 @@ class LaraParaServiceProvider extends PackageServiceProvider
      * Returns the amount column, so `->nullable()`, `->default()` and the rest of the chain land on
      * the column they read as landing on.
      */
+    #[Throws(InvalidColumnScale::class)]
     public static function moneyColumns(
         Blueprint $table,
         string $name,
@@ -114,15 +117,18 @@ class LaraParaServiceProvider extends PackageServiceProvider
         $currencyColumn = static::currencyColumnFor($name);
 
         if (config('larapara.store.format') === 'decimal') {
-            $decimalScale = $scale ?? static::decimalScale();
+            $scale ??= static::decimalScale();
 
-            if ($decimalScale > $decimalTotal) {
-                throw new \InvalidArgumentException(
-                    'The decimal scale '.$decimalScale.' does not fit a decimal('.$decimalTotal.') column.'
-                );
+            // A decimal column cannot keep more decimals than it holds digits at all: MySQL and
+            // PostgreSQL both refuse the column, while SQLite takes it and every amount written to
+            // it — so a project whose tests run on SQLite would hear this from its own database, at
+            // deploy time. The narrow macro is the one that runs out of digits: eight decimals, the
+            // scale a crypto amount needs, leave nothing of smallMoney()'s six.
+            if ($scale >= $decimalTotal) {
+                throw InvalidColumnScale::exceedsColumnDigits($name, $scale, $decimalTotal);
             }
 
-            $amount = $table->decimal($name, $decimalTotal, $decimalScale);
+            $amount = $table->decimal($name, $decimalTotal, $scale);
         } else {
             $amount = $table->{$integerType}($name);
         }

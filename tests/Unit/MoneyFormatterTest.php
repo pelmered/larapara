@@ -491,6 +491,22 @@ it('keeps the decimals of the number unless asked for others', function (mixed $
     'more than three'   => [1234.56789, 5, '1,234.56789'],
 ]);
 
+// ICU stops at three fraction digits of its own accord, so the decimals of the value were kept only
+// as long as it had no more than three of them: nothing asked for 1234.5678 to be written as
+// 1,234.568, or for a tenth of a cent to be written as 0.
+it('keeps the decimals of the number past the third', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'four decimals'          => [1234.5678, '1,234.5678'],
+    'four decimals as text'  => ['1234.5678', '1,234.5678'],
+    'eight, a crypto amount' => [1.23456789, '1.23456789'],
+    'below the third'        => [0.00001234, '0.00001234'],
+    // The noise of the binary representation is absorbed rather than written out: 1.005 is held as
+    // 1.00499999999999989, and a tenth plus two tenths as 0.30000000000000004.
+    'a value a double rounds' => [1.005, '1.005'],
+    'a sum a double rounds'   => [0.1 + 0.2, '0.3'],
+]);
+
 // A Money carries its own currency, and its amount is the minor units of that currency — the two
 // entry points are the same amount either way round.
 it('formats a Money object and its amount alike', function (): void {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Pelmered\LaraPara\MoneyFormatter;
+namespace Pelmered\LaraPara\Currencies;
 
 class CurrencyFormattingRules
 {

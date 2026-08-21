@@ -172,6 +172,17 @@ UYW; crypto currencies carry eight. `MoneyCast` refuses an amount whose minor un
 represent rather than letting the database round it away, so raise the scale — in the config and in the
 column — or store amounts as integer minor units.
 
+A column given a scale of its own has to tell the cast the same, since the cast is the side that refuses
+the amount: `MoneyCast::class.':8'` beside `money('price', scale: 8)`. Told nothing, the cast refuses by
+`store.decimal_scale`, which turns down a satoshi the column has room for.
+
+The scale has to leave the column a digit for the amount itself, and `smallMoney()` holds six digits
+where the others hold twelve — so the eight decimals a crypto amount needs do not fit in a small column
+at all. A macro that would write such a column throws
+`Pelmered\LaraPara\Exceptions\InvalidColumnScale` rather than leaving it to the database: MySQL and
+PostgreSQL refuse `decimal(6, 8)`, while SQLite accepts it and every amount written to it, so a test
+suite on SQLite would have nothing to say about the migration production refuses.
+
 To add a currency column to an existing amount column, add it as nullable, backfill the rows you already
 have, and only then make it required:
 
@@ -209,6 +220,10 @@ protected function casts(): array
     ];
 }
 ```
+
+A column the migration gave a scale of its own takes that scale here too, so the cast refuses the amounts
+the column cannot hold and no others: `'price' => MoneyCast::class.':8'` beside
+`$table->money('price', scale: 8)`. See [migrations](#migrations).
 
 Reading gives you value objects:
 
@@ -459,6 +474,7 @@ MoneyFormatter::formatNumber(1234.56, 'en_US');        // 1,234.56
 MoneyFormatter::formatNumber('1234.56', 'en_US');      // 1,234.56
 MoneyFormatter::formatNumber(1234, 'en_US');           // 1,234
 MoneyFormatter::formatNumber(1234.5, 'en_US');         // 1,234.5
+MoneyFormatter::formatNumber(1234.5678, 'en_US');      // 1,234.5678 — however many it has
 MoneyFormatter::formatNumber(1234.56, 'de_DE');        // 1.234,56
 MoneyFormatter::formatNumber(1234.56, 'sv_SE');        // 1 234,56
 
@@ -943,6 +959,20 @@ MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); 
 ICU has no *symbol* for a currency outside ISO 4217, so it writes the code where the symbol would go and
 places it the way the locale places a symbol. That is the only part of the output crypto support is
 missing, and it is what `getFormattingRules()->currencySymbol` reports too.
+
+The code comes out in full whatever its length. ICU carries a currency as a three-character code —
+truncating a longer one and refusing a shorter one — so the 181 bundled codes that are not three
+characters (`1000SATS`, `AUCTION`, `AI`) are handed to it as the symbol instead, which is the same thing
+it writes for the rest. Parsing reads that notation back in strict mode as well as lenient, since it is
+what this package writes and ICU has no reading of these codes to be strict about:
+
+```php
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('1000SATS'), 'en_US');
+// 1000SATS 1.00000000
+
+MoneyFormatter::parseToMinor('1000SATS 1.00000000', Currency::fromCode('1000SATS'), 'en_US', strict: true);
+// '100000000'
+```
 
 The minor unit is read from the code, so it does not matter which object you hold: a bare
 `Money\Currency` is looked up in the registry the same way a LaraPara `Currency` carries it. A code no

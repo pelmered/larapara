@@ -26,6 +26,20 @@ class TestModel extends Model
     protected $fillable = ['amount', 'currency'];
 }
 
+// A column given a scale of its own by the macro — `$table->money('price', scale: 8)` — needs the
+// cast told the same, since the cast is the side that refuses an amount the column cannot hold.
+class FineScaleModel extends Model
+{
+    protected $guarded = [];
+
+    public $timestamps = false;
+
+    protected $casts = [
+        'price'          => MoneyCast::class.':8',
+        'price_currency' => CurrencyCast::class,
+    ];
+}
+
 // Casting only the amount is a supported configuration too — nothing in MoneyCast requires
 // CurrencyCast — and it is the only one that can hold a currency code the registry would refuse.
 class AmountOnlyModel extends Model
@@ -336,3 +350,52 @@ it('reads a decimal column whatever scale it kept', function (string $currency, 
     'no minor units, padded'       => ['JPY', '1234.000', '1234'],
     'more decimals than the unit'  => ['USD', '1234.567', '123457'],
 ]);
+
+// The scale used to come from the configuration alone, so a column the macro gave eight decimals to
+// still refused a satoshi while the configured scale was three, and a column given fewer decimals
+// than the configuration accepted amounts the database would round away.
+it('refuses an amount by the scale the cast was given', function (): void {
+    config([
+        'larapara.store.format'           => 'decimal',
+        'larapara.store.decimal_scale'    => 3,
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', 'BTC'],
+    ]);
+
+    $model = new TestModel;
+    $money = new Money('123456789', new Currency('BTC'));
+
+    expect((new MoneyCast(8))->set($model, 'price', $money, [])['price'])->toBe('1.23456789')
+        ->and(fn (): array => (new MoneyCast)->set($model, 'price', $money, []))
+        ->toThrow(InvalidAmount::class);
+});
+
+it('refuses an amount the narrower column of the cast cannot hold', function (): void {
+    config([
+        'larapara.store.format'         => 'decimal',
+        'larapara.store.decimal_scale'  => 8,
+        'larapara.available_currencies' => ['USD', 'BHD'],
+    ]);
+
+    $model = new TestModel;
+    $cast  = new MoneyCast(2);
+
+    expect($cast->set($model, 'price', new Money('1234560', new Currency('BHD')), [])['price'])->toBe('1234.56')
+        ->and(fn (): array => $cast->set($model, 'price', new Money('1234567', new Currency('BHD')), []))
+        ->toThrow(InvalidAmount::class);
+});
+
+// Eloquent hands a cast its parameters as strings, so the scale arrives as '8' rather than as 8.
+it('takes the scale as a cast parameter', function (): void {
+    config([
+        'larapara.store.format'           => 'decimal',
+        'larapara.store.decimal_scale'    => 3,
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', 'BTC'],
+    ]);
+
+    $model        = new FineScaleModel;
+    $model->price = new Money('123456789', new Currency('BTC'));
+
+    expect($model->getAttributes()['price'])->toBe('1.23456789');
+});

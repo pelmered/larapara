@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
+use Pelmered\LaraPara\Currencies\CurrencyFormattingRules;
 
 it('creates a correct default rules instance', function (): void {
     $rules = new CurrencyFormattingRules(

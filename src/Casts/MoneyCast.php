@@ -23,6 +23,15 @@ use PhpStaticAnalysis\Attributes\Throws;
 class MoneyCast implements CastsAttributes
 {
     /**
+     * @param  int|null  $scale  Decimals the column keeps, where they are not the configured ones:
+     *                           `MoneyCast::class.':8'` beside `$table->money('price', scale: 8)`.
+     *                           The scale an amount is refused for carrying more of, so a column
+     *                           given its own scale has to say so here as well — otherwise the
+     *                           amounts this cast accepts are not the ones the column holds.
+     */
+    public function __construct(private readonly ?int $scale = null) {}
+
+    /**
      * Cast the given value.
      */
     #[Param(value: 'int|float|string|null')]
@@ -55,7 +64,7 @@ class MoneyCast implements CastsAttributes
 
         $stored = match (true) {
             // Before the format branch, since dividing null by the scale factor would store a zero.
-            $amount                         === null                              => null,
+            $amount                         === null      => null,
             config('larapara.store.format') === 'decimal' => $this->toDecimal($amount, $currency),
             default                                       => $amount,
         };
@@ -120,7 +129,7 @@ class MoneyCast implements CastsAttributes
     protected function toDecimal(int $amount, string $currency): string
     {
         $minorUnit = $this->getDecimals($currency);
-        $scale     = LaraParaServiceProvider::decimalScale();
+        $scale     = $this->scale ?? LaraParaServiceProvider::decimalScale();
 
         if ($minorUnit > $scale) {
             $unrepresentable = 10 ** ($minorUnit - $scale);

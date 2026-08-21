@@ -108,8 +108,10 @@ named for what it takes:
 - `formatFromMinor()` is the old `format()`: the same arguments, minus the `Money` it no longer accepts,
   and named for the unit it takes — neither `format` nor `formatAmount` said that 123456 means $1,234.56.
 - `formatNumber()` scales nothing: `formatNumber(1234.56, 'en_US')` is `1,234.56` and
-  `formatNumber(1234, 'en_US')` is `1,234.00`. Its `$minorDecimals` parameter is gone, and so is the
-  `minorUnits` argument and the `number_format.minor_units` config key of the previous iteration.
+  `formatNumber(1234, 'en_US')` is `1,234`. It keeps the decimals the value has, however many there are —
+  `formatNumber(1234.5678, 'en_US')` is `1,234.5678`, where ICU's own default stops at three. Its
+  `$minorDecimals` parameter is gone, and so is the `minorUnits` argument and the
+  `number_format.minor_units` config key of the previous iteration.
 
 ```php
 // a Money — what MoneyCast gives you
@@ -218,6 +220,12 @@ that crypto support is missing, rather than the exception it used to be. This al
 validation rule, which raised `UnknownCurrencyException` out of the parser for a crypto currency instead
 of reporting a validation failure.
 
+The code is written in full however long it is. ICU carries a currency as a three-character code, so it
+truncated the 170 bundled codes that are longer — `1000SATS` came out as `100`, an amount labelled as a
+currency it is not — and threw a `TypeError` out of the money library for the 11 that are shorter. Such a
+code is handed to ICU as the currency's symbol now, which is what it writes for a currency outside
+ISO 4217 anyway, and `parseToMinor()` reads that notation back in strict mode as well.
+
 ## A currency's minor unit is read from its code
 
 Only a LaraPara `Currency` carried a minor unit, so a bare `Money\Currency` outside ISO 4217 was read at
@@ -264,6 +272,16 @@ and a `scale` argument on each macro. An amount whose minor units the scale cann
 `Pelmered\LaraPara\Exceptions\InvalidAmount` instead of being rounded away by the database: CLF and UYW
 carry four minor units, and every crypto currency carries eight. Raise the scale in the config and in the
 column, pass `scale:` to the macro, or store amounts as integer minor units.
+
+A column given its own scale has to tell the cast the same — `MoneyCast::class.':8'` beside
+`money('price', scale: 8)` — since the cast is the side that refuses the amount. Told nothing, it refuses
+by `store.decimal_scale` whatever the column holds.
+
+A scale that leaves the column no digits for the amount itself is refused with
+`Pelmered\LaraPara\Exceptions\InvalidColumnScale` as the migration is built. `smallMoney()` holds six
+digits, so `store.decimal_scale = 8` — the setting a crypto project is told to use — used to write
+`decimal(6, 8)`: a column MySQL and PostgreSQL reject and SQLite silently accepts. Use `money()` for
+those columns, or keep the small ones on integer storage.
 
 `MoneyCast::set()` also writes the decimal by placing the point rather than by dividing, so the value
 reaching the column is a numeric string instead of a float and an amount larger than a double holds
