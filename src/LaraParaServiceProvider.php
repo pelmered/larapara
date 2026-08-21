@@ -117,7 +117,7 @@ class LaraParaServiceProvider extends PackageServiceProvider
         $currencyColumn = static::currencyColumnFor($name);
 
         if (config('larapara.store.format') === 'decimal') {
-            $scale ??= static::decimalScale();
+            $scale = static::decimalScale($scale);
 
             // A decimal column cannot keep more decimals than it holds digits at all: MySQL and
             // PostgreSQL both refuse the column, while SQLite takes it and every amount written to
@@ -164,10 +164,18 @@ class LaraParaServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * Decimals a decimal amount column keeps, which is what a stored amount is rounded to.
+     * Decimals a decimal amount column keeps, which is what a stored amount is written with.
+     *
+     * Takes the scale a caller names — a macro argument or a cast parameter — and answers with the
+     * configured one otherwise, so the one gate below sees every scale either side works from. A
+     * scale is a count of decimals: a negative one is not a wider column but a nonsense one, and it
+     * moved the point the wrong way rather than being refused.
      */
-    public static function decimalScale(): int
+    #[Throws(InvalidColumnScale::class)]
+    public static function decimalScale(?int $scale = null): int
     {
-        return (int) config('larapara.store.decimal_scale', self::DEFAULT_DECIMAL_SCALE);
+        $scale ??= (int) config('larapara.store.decimal_scale', self::DEFAULT_DECIMAL_SCALE);
+
+        return $scale >= 0 ? $scale : throw InvalidColumnScale::negative($scale);
     }
 }

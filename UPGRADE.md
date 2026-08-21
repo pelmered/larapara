@@ -226,6 +226,28 @@ currency it is not — and threw a `TypeError` out of the money library for the 
 code is handed to ICU as the currency's symbol now, which is what it writes for a currency outside
 ISO 4217 anyway, and `parseToMinor()` reads that notation back in strict mode as well.
 
+Strict mode holds such a code to the same rules as one ICU carries: the code where the locale puts the
+symbol, separated by the space of the locale or by nothing, and the sign where the locale puts it — which
+for `en_US` is before the code, so a negative amount in such a currency now reads back at all. A plain
+space where the locale writes a no-break one, or the code on the wrong side of the number, is forgiven
+leniently and refused strictly, exactly as it is for `USD`.
+
+## Formatting refuses a value a double cannot carry
+
+ICU renders through a double, which carries fifteen significant decimal digits, and so did every format
+call here — silently. `formatNumber('9007199254740993', 'en_US')` returned `9,007,199,254,740,992`, and
+an amount of `900719925474099301` minor units in USD was written as `$9,007,199,254,740,994.00`: a dollar
+away from an amount the casts store and read back exactly.
+
+Such a value now throws `Pelmered\LaraPara\Exceptions\InvalidNumber` from `formatNumber()` and
+`Pelmered\LaraPara\Exceptions\InvalidAmount` from `formatFromMinor()` and `format()`, rather than being
+rendered as the neighbouring number a double happens to hold. The value decides it, not the count of its
+digits: a sixteen-digit amount below 2^53 is carried exactly, and so is one written with trailing zeros.
+`formatShortFromMinor()` still abbreviates any amount, being an approximation by intent.
+
+`formatNumber()` also keeps every decimal a numeric string carries, rather than the fourteen places that
+absorb the noise of a float: `formatNumber('0.000000000000001', 'en_US')` is that number, not `0`.
+
 ## A currency's minor unit is read from its code
 
 Only a LaraPara `Currency` carried a minor unit, so a bare `Money\Currency` outside ISO 4217 was read at
@@ -234,6 +256,20 @@ the same call with `'BTC'` gave 100000000 — the same amount a factor of a mill
 object the caller happened to hold. The code is looked up in the registry now, so every way of naming a
 currency reads and writes the same amount. A code no currency list has still falls back to two decimals,
 since nothing knows any better.
+
+## `CurrencyFormattingRules` moved to the `Currencies` namespace
+
+`MoneyFormatter::getFormattingRules()` returns the same object, from a new namespace:
+
+```php
+-use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
++use Pelmered\LaraPara\Currencies\CurrencyFormattingRules;
+```
+
+It describes a currency rather than the formatter that reads it, and it sits beside `Currency` now. Code
+that only calls `getFormattingRules()` and reads its properties needs no change; an import, a type
+declaration or a `new` of the old name fails with a class-not-found error, and there is no alias left
+behind at the old name.
 
 ## The currency column is never nullable
 
@@ -276,6 +312,11 @@ column, pass `scale:` to the macro, or store amounts as integer minor units.
 A column given its own scale has to tell the cast the same — `MoneyCast::class.':8'` beside
 `money('price', scale: 8)` — since the cast is the side that refuses the amount. Told nothing, it refuses
 by `store.decimal_scale` whatever the column holds.
+
+A negative scale is refused too, wherever it is named — the config key, the `scale:` argument or the cast
+parameter. It used to reach the column as `decimal(12, -1)`, which MySQL rejects, and the cast moved the
+point the wrong way rather than refusing: `$1,230.00` was stored as `1.23`, a thousandth of the amount,
+while `$1,234.56` threw. A scale is a count of decimals, so it starts at zero.
 
 A scale that leaves the column no digits for the amount itself is refused with
 `Pelmered\LaraPara\Exceptions\InvalidColumnScale` as the migration is built. `smallMoney()` holds six

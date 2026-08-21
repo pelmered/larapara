@@ -6,6 +6,7 @@ use Money\Money;
 use Pelmered\LaraPara\Casts\CurrencyCast;
 use Pelmered\LaraPara\Casts\MoneyCast;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
+use Pelmered\LaraPara\Exceptions\InvalidColumnScale;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use Pelmered\LaraPara\Tests\Support\Models\Post;
 
@@ -463,3 +464,24 @@ it('takes an amount in minor units however it is written', function (mixed $valu
     'a negative string' => ['-123456', -123456],
     'zero'              => ['0', 0],
 ]);
+
+// The cast moved the point the wrong way for a negative scale instead of refusing it, and only for
+// the amounts it could: $1,230.00 was stored as 1.23, a thousandth of the amount, while $1,234.56
+// threw. A scale is a count of decimals, so neither side of the column takes a negative one.
+it('refuses a negative scale', function (): void {
+    config([
+        'larapara.store.format'         => 'decimal',
+        'larapara.available_currencies' => ['USD'],
+    ]);
+
+    $model = new TestModel;
+    $money = new Money('123000', new Currency('USD'));
+
+    expect(fn (): array => (new MoneyCast(-1))->set($model, 'price', $money, []))
+        ->toThrow(InvalidColumnScale::class);
+
+    config(['larapara.store.decimal_scale' => -1]);
+
+    expect(fn (): array => (new MoneyCast)->set($model, 'price', $money, []))
+        ->toThrow(InvalidColumnScale::class);
+});

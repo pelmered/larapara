@@ -26,6 +26,15 @@ class InvalidAmount extends InvalidArgumentException
         );
     }
 
+    public static function exceedsFormattingPrecision(string $value, string $currency): self
+    {
+        return new self(
+            'The amount "'.$value.'" in '.$currency.' is more minor units than a double carries exactly, '
+            .'and formatting renders it through one, so it would be written as a neighbouring amount. '
+            .'Abbreviate it with formatShortFromMinor(), which is an approximation by intent.'
+        );
+    }
+
     public static function notMinorUnits(string $value): self
     {
         return new self(

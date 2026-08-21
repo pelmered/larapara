@@ -150,6 +150,12 @@ class MoneyFormatter
 
         $amount = self::toMinorUnits($value);
 
+        // Both routes below hand the amount to ICU as a double — the money library's formatter casts
+        // to one too — so an amount a double cannot carry would be written as a neighbouring one.
+        if (! self::carriedExactly($amount)) {
+            throw InvalidAmount::exceedsFormattingPrecision((string) $amount, self::asMoneyCurrency($currency)->getCode());
+        }
+
         if (! $showCurrencySymbol) {
             // Nothing here needs ICU's data for the currency — only the minor unit, to place the
             // decimal point — so this reads a currency ICU has never heard of, crypto included.
@@ -211,7 +217,17 @@ class MoneyFormatter
 
         self::assertDigits($decimals, $significantDigits);
 
-        $numberFormatter = self::getNumberFormatter($locale, NumberFormatter::DECIMAL, $decimals, $significantDigits);
+        if (! self::carriedExactly($value)) {
+            throw InvalidNumber::exceedsDoublePrecision();
+        }
+
+        $numberFormatter = self::getNumberFormatter(
+            $locale,
+            NumberFormatter::DECIMAL,
+            $decimals,
+            $significantDigits,
+            maxDecimals: self::writtenDecimals($value),
+        );
 
         return (string) $numberFormatter->format((float) $value);  // Outputs something like "1.234,56"
     }
@@ -338,14 +354,10 @@ class MoneyFormatter
 
         if ($parsed === false && ! self::icuCarriesCode($currency->getCode())) {
             // ICU can neither write nor read a code it cannot carry, so the notation the formatter
-            // writes for one — the code beside the number — is read here rather than by ICU. In
-            // strict mode too, since this is what this configuration writes: a parser that refuses
-            // its own output is a trap, and ICU has no reading of these to be strict about.
-            $withoutCode = self::withoutCurrency($moneyString, $locale, $currency);
-
-            if ($withoutCode !== $moneyString) {
-                $parsed = self::parseLocalizedNumber($numberFormatter, $withoutCode);
-            }
+            // writes for one is read here rather than by ICU — and held to the same rules ICU holds
+            // its own codes to, since strict mode accepts this notation. Everything looser is left
+            // to the forgiveness below, which is what separates the two modes.
+            $parsed = self::parseCodeAsSymbol($numberFormatter, $moneyString, $locale, $currency);
         }
 
         if ($parsed === false && ! $strict) {
@@ -581,6 +593,190 @@ class MoneyFormatter
             $numberSuffix,
             currencyCode: $code,
         )->format($major);
+    }
+
+    /**
+     * Whether a double carries the value as it was written, digit for digit.
+     *
+     * ICU takes a double and a double carries fifteen significant decimal digits, so a value written
+     * with more of them is rendered as the neighbouring one a double holds instead. Compared against
+     * the double's own decimal expansion rather than by counting digits, since a sixteen-digit value
+     * below 2**53 is carried exactly and a nineteen-digit one ending in zeros is too.
+     *
+     * A float is a double already, and so is a value in exponent notation: neither was written in
+     * decimal digits, so neither has any to lose here.
+     */
+    private static function carriedExactly(int|float|string $value): bool
+    {
+        $written = self::plainDecimal($value);
+
+        if ($written === null) {
+            return true;
+        }
+
+        [, $fraction] = array_pad(explode('.', $written, 2), 2, '');
+
+        return self::sameDigits($written, sprintf('%.'.strlen($fraction).'F', (float) $written));
+    }
+
+    /**
+     * The decimals a value was written with, or null where it was not written as a plain decimal.
+     *
+     * What "the decimals it has" means for a numeric string, which carries exactly the decimals it
+     * was written with — a float carries as many as its binary representation happens to expand to.
+     */
+    private static function writtenDecimals(int|float|string $value): ?int
+    {
+        $written = self::plainDecimal($value);
+
+        if ($written === null) {
+            return null;
+        }
+
+        [, $fraction] = array_pad(explode('.', $written, 2), 2, '');
+
+        return strlen($fraction);
+    }
+
+    /**
+     * The value as the plain decimal it was written as, or null where it was not written as one.
+     */
+    private static function plainDecimal(int|float|string $value): ?string
+    {
+        if (is_float($value)) {
+            return null;
+        }
+
+        $written = ltrim(trim((string) $value), '+');
+
+        return preg_match('/^-?\d*(?:\.\d*)?$/', $written) === 1 ? $written : null;
+    }
+
+    /**
+     * Whether two decimals are written with the same digits, leading zeros aside.
+     */
+    private static function sameDigits(string $left, string $right): bool
+    {
+        $digits = static function (string $number): string {
+            [$whole, $fraction] = array_pad(explode('.', $number, 2), 2, '');
+            $sign               = str_starts_with($whole, '-') ? '-' : '';
+            $whole              = ltrim(ltrim($whole, '-'), '0');
+
+            return $sign.($whole === '' ? '0' : $whole).($fraction === '' ? '' : '.'.$fraction);
+        };
+
+        return $digits($left) === $digits($right);
+    }
+
+    /**
+     * Reads an amount written with a currency code ICU cannot carry, in the notation it is written in.
+     *
+     * Held to what ICU holds a code it does carry to: the code where the symbol goes and nowhere
+     * else, separated from the number by the space of the locale or by nothing at all — which is
+     * what ICU reads back — and the sign where the locale puts it, which for en_US is before the
+     * code rather than at either end of the string.
+     */
+    private static function parseCodeAsSymbol(
+        NumberFormatter $numberFormatter,
+        string $value,
+        string $locale,
+        MoneyCurrency $currency,
+    ): float|false {
+        foreach ([1, -1] as $sign) {
+            foreach (self::codeAffixes($locale, $currency->getCode(), $sign) as [$prefix, $suffix]) {
+                $number = self::betweenAffixes($value, $prefix, $suffix);
+
+                if ($number === null) {
+                    continue;
+                }
+
+                $parsed = self::parseLocalizedNumber($numberFormatter, $number);
+
+                if ($parsed !== false) {
+                    return $sign * $parsed;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What ICU writes on either side of the number, for a code it carries as the symbol.
+     *
+     * Read from ICU rather than assembled here: two amounts formatted the same way differ only in
+     * their digits, so what the two share is the affix, carrying the code, the sign, the space ICU
+     * inserts and any directional marks of the locale. Read that way because the code itself can
+     * contain digits — 1000SATS does — so the number cannot be found by looking for one.
+     *
+     * Both with that space and without it, since ICU reads its own codes either way.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private static function codeAffixes(string $locale, string $code, int $sign): array
+    {
+        $formatter = self::getNumberFormatter($locale, NumberFormatter::CURRENCY, 0, null, currencyCode: $code);
+
+        $one = mb_str_split((string) $formatter->format($sign));
+        $two = mb_str_split((string) $formatter->format($sign * 2));
+        $len = min(count($one), count($two));
+
+        $prefix = '';
+
+        for ($i = 0; $i < $len && $one[$i] === $two[$i]; $i++) {
+            $prefix .= $one[$i];
+        }
+
+        $suffix = '';
+
+        for ($i = 1; $i <= $len - mb_strlen($prefix) && $one[count($one) - $i] === $two[count($two) - $i]; $i++) {
+            $suffix = $one[count($one) - $i].$suffix;
+        }
+
+        $affixes   = [[$prefix, $suffix]];
+        $spaceless = [self::withoutSeparatingSpace($prefix, trailing: true), self::withoutSeparatingSpace($suffix, trailing: false)];
+
+        if ($spaceless !== $affixes[0]) {
+            $affixes[] = $spaceless;
+        }
+
+        return $affixes;
+    }
+
+    /**
+     * The affix without the space ICU inserts between an alphanumeric code and a digit.
+     */
+    private static function withoutSeparatingSpace(string $affix, bool $trailing): string
+    {
+        $characters = mb_str_split($affix);
+
+        if ($characters === []) {
+            return $affix;
+        }
+
+        $index = $trailing ? count($characters) - 1 : 0;
+
+        if (! in_array($characters[$index], self::SPACE_SEPARATORS, true)) {
+            return $affix;
+        }
+
+        unset($characters[$index]);
+
+        return implode('', $characters);
+    }
+
+    /**
+     * What stands between the two affixes, or null where the string does not carry them both.
+     */
+    private static function betweenAffixes(string $value, string $prefix, string $suffix): ?string
+    {
+        if (! str_starts_with($value, $prefix) || ! str_ends_with($value, $suffix)) {
+            return null;
+        }
+
+        $number = substr($value, strlen($prefix), strlen($value) - strlen($prefix) - strlen($suffix));
+
+        return $number === '' ? null : $number;
     }
 
     /**
@@ -853,6 +1049,7 @@ class MoneyFormatter
         ?int $significantDigits = null,
         string $numberSuffix = '',
         ?string $currencyCode = null,
+        ?int $maxDecimals = null,
     ): NumberFormatter {
         $locale             = self::resolveLocale($locale);
         $intlCurrencySymbol = (bool) config('larapara.intl_currency_symbol');
@@ -869,6 +1066,7 @@ class MoneyFormatter
             $numberSuffix,
             (int) $intlCurrencySymbol,
             $currencyCode ?? '',
+            $maxDecimals  ?? 'default',
         ]);
 
         return self::$numberFormatters[$key] ??= self::buildNumberFormatter(
@@ -879,6 +1077,7 @@ class MoneyFormatter
             $numberSuffix,
             $intlCurrencySymbol,
             $currencyCode,
+            $maxDecimals,
         );
     }
 
@@ -890,6 +1089,7 @@ class MoneyFormatter
         string $numberSuffix,
         bool $intlCurrencySymbol,
         ?string $currencyCode,
+        ?int $maxDecimals,
     ): NumberFormatter {
         $numberFormatter = new NumberFormatter($locale, $style);
 
@@ -919,8 +1119,13 @@ class MoneyFormatter
         } else {
             // Neither given keeps the decimals the value has, rather than the three ICU stops at of
             // its own accord: nothing asked for 1234.5678 to be rendered as 1,234.568, or for
-            // 0.00001234 to be rendered as 0.
-            $numberFormatter->setAttribute(NumberFormatter::MAX_FRACTION_DIGITS, self::SIGNIFICANT_DECIMAL_PLACES);
+            // 0.00001234 to be rendered as 0. A value written as a decimal says how many it has; a
+            // float says only what its binary representation expands to, and the places below carry
+            // that without writing out its noise.
+            $numberFormatter->setAttribute(
+                NumberFormatter::MAX_FRACTION_DIGITS,
+                $maxDecimals ?? self::SIGNIFICANT_DECIMAL_PLACES,
+            );
         }
 
         return $numberFormatter;

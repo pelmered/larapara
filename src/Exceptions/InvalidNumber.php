@@ -17,6 +17,19 @@ class InvalidNumber extends InvalidArgumentException
         );
     }
 
+    /**
+     * The value is left out of the message: a number carrying sixteen digits is as often a card
+     * number pasted into a field as it is an amount, and this message goes to the log.
+     */
+    public static function exceedsDoublePrecision(): self
+    {
+        return new self(
+            'The given number carries more significant digits than a double holds, and formatting '
+            .'renders it through one, so what came out would be a different number. Fifteen '
+            .'significant digits are carried exactly: round the value to that, or keep it as text.'
+        );
+    }
+
     public static function conflictingDigits(): self
     {
         return new self('Pass either $decimals or $significantDigits, not both: they are two ways to say how precise the output is.');

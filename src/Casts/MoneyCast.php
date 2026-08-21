@@ -130,14 +130,14 @@ class MoneyCast implements CastsAttributes
      * The amount as the decimal string a decimal column stores.
      *
      * Built by placing the point rather than by dividing, so an amount larger than a double holds
-     * exactly is not deformed on its way to the column, and refused outright when the configured
-     * scale would round a digit away instead of letting the database drop it silently.
+     * exactly is not deformed on its way to the column, and refused outright when the scale in
+     * effect would round a digit away instead of letting the database drop it silently.
      */
     #[Throws(InvalidAmount::class)]
     protected function toDecimal(int $amount, string $currency): string
     {
         $minorUnit = $this->getDecimals($currency);
-        $scale     = $this->scale ?? LaraParaServiceProvider::decimalScale();
+        $scale     = LaraParaServiceProvider::decimalScale($this->scale);
 
         if ($minorUnit > $scale) {
             $unrepresentable = 10 ** ($minorUnit - $scale);

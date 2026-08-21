@@ -527,3 +527,37 @@ it('abbreviates a Money object by its own currency', function (): void {
 
     expect(MoneyFormatter::formatShort($yen, 'en_US'))->toBe('¥123.46M');
 });
+
+// A double carries fifteen significant decimal digits and ICU takes a double, so a value written with
+// more of them was rendered as a different number with nothing said about it: '9007199254740993' came
+// out as 9,007,199,254,740,992. Refused rather than deformed, as everything else here is.
+it('refuses a number a double cannot carry digit for digit', function (mixed $value): void {
+    expect(fn (): string => MoneyFormatter::formatNumber($value, 'en_US'))->toThrow(InvalidNumber::class);
+})->with([
+    'past what a double holds' => ['9007199254740993'],
+    'the same as an int'       => [9007199254740993],
+    'seventeen decimals'       => ['0.12345678901234567'],
+    'nineteen digits'          => ['1234567890123456789'],
+]);
+
+// The value rather than the count of its digits: a sixteen-digit number below 2**53 is carried
+// exactly, and a float is a double already, so nothing was lost on its way in to refuse it for.
+it('formats a number a double carries digit for digit', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'fifteen digits'         => ['999999999999999', '999,999,999,999,999'],
+    'sixteen, still exact'   => ['1234567890123456', '1,234,567,890,123,456'],
+    'zeros past the range'   => ['1000000000000000000', '1,000,000,000,000,000,000'],
+    'a float past the range' => [1.0e20, '100,000,000,000,000,000,000'],
+    'exponent notation'      => ['1.5e3', '1,500'],
+]);
+
+// A numeric string carries a known number of decimals, so all of them are kept — the fourteen places
+// that absorb the noise of a binary representation are what a float gets, which is what needs them.
+it('keeps every decimal a numeric string carries', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'fifteen decimals'  => ['0.000000000000001', '0.000000000000001'],
+    'seventeen places'  => ['0.00000000000000123', '0.00000000000000123'],
+    'a float, absorbed' => [0.1 + 0.2, '0.3'],
+]);

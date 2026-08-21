@@ -282,3 +282,14 @@ it('compiles through the MySQL and Postgres grammars', function (string $macro, 
         '"price" decimal(12, 3) not null',
     ],
 ]);
+
+// A scale is a count of decimals, so a negative one is not a narrower column but a nonsense one: the
+// macro wrote decimal(12, -1), which MySQL rejects outright and other drivers read as they please.
+it('refuses a negative scale', function (?int $scale, int $configured): void {
+    config(['larapara.store.format' => 'decimal', 'larapara.store.decimal_scale' => $configured]);
+
+    expect(fn (): array => macroColumns('money', [null, $scale]))->toThrow(InvalidColumnScale::class);
+})->with([
+    'from the macro'  => [-1, 3],
+    'from the config' => [null, -1],
+]);

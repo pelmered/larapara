@@ -9,6 +9,15 @@ use Pelmered\LaraPara\LaraParaServiceProvider;
 
 class InvalidColumnScale extends InvalidArgumentException
 {
+    public static function negative(int $scale): self
+    {
+        return new self(
+            'A decimal scale is a count of decimals, so '.$scale.' is not one. Set '
+            .'`larapara.store.decimal_scale`, the `scale:` argument of a column macro and the '
+            .'parameter of MoneyCast to zero or more decimals.'
+        );
+    }
+
     public static function exceedsColumnDigits(string $column, int $scale, int $digits): self
     {
         return new self(

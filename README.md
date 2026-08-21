@@ -421,7 +421,9 @@ public static function formatFromMinor(
 - `$value`: minor units as an int or a numeric string, or `null`/`''` (returns an empty string).
   An amount that is not whole minor units — `'199.99'`, `'1,234'`, `'not a number'` — throws
   `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than being truncated to a wrong amount.
-  For a `Money` object, use [`format()`](#format).
+  So does an amount above 2^53 minor units, which is what ICU renders through a double: it would be
+  written as a neighbouring amount, so it is refused instead. `formatShortFromMinor()` still
+  abbreviates it, being an approximation by intent. For a `Money` object, use [`format()`](#format).
 - `$currency`: a LaraPara `Currency` or a `Money\Currency`, which says how many minor units make a unit.
 - `$decimals`: how many decimals to write, defaulting to the minor unit of the currency, so ¥ amounts
   carry no decimals and BHD amounts carry three.
@@ -464,8 +466,9 @@ public static function formatNumber(
   [`parseToMinor()`](#parsetominor)'s job. `null` and `''` return an empty string, and anything else
   that is not a number throws `Pelmered\LaraPara\Exceptions\InvalidNumber` rather than rendering as
   nothing.
-- `$decimals`: how many decimals to write. Defaults to as many as the value has, which is what the locale
-  would print.
+- `$decimals`: how many decimals to write. Defaults to as many as the value has: every decimal of a
+  numeric string, since a string carries exactly the decimals it was written with, and up to fourteen
+  places of a float, which is where the noise of a binary representation starts.
 - `$significantDigits`: an alternative to `$decimals`, not a companion to it. Passing both throws.
 
 This formats the number it is given and scales nothing. A count of minor units means nothing without
@@ -490,6 +493,11 @@ MoneyFormatter::formatNumber(1234.56, 'en_US', significantDigits: 2); // 1,200
 MoneyFormatter::formatNumber(null, 'en_US');           // ''
 MoneyFormatter::formatNumber('not a number', 'en_US'); // InvalidNumber
 MoneyFormatter::formatNumber('1.234,56', 'en_US');     // InvalidNumber — that is a localized string
+
+// A double carries fifteen significant digits, and ICU renders through one, so a value written with
+// more of them is refused rather than rendered as the number a double happens to hold.
+MoneyFormatter::formatNumber('1234567890123456', 'en_US'); // 1,234,567,890,123,456 — exact
+MoneyFormatter::formatNumber('9007199254740993', 'en_US'); // InvalidNumber — past 2^53
 ```
 
 For an amount without a currency symbol — which is what a minor-unit value usually wants — use
@@ -972,11 +980,22 @@ it writes for the rest. Parsing reads that notation back in strict mode as well 
 what this package writes and ICU has no reading of these codes to be strict about:
 
 ```php
-MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('1000SATS'), 'en_US');
-// 1000SATS 1.00000000
+$sats      = Currency::fromCode('1000SATS');
+$formatted = MoneyFormatter::formatFromMinor(100000000, $sats, 'en_US'); // 1000SATS 1.00000000
 
-MoneyFormatter::parseToMinor('1000SATS 1.00000000', Currency::fromCode('1000SATS'), 'en_US', strict: true);
-// '100000000'
+MoneyFormatter::parseToMinor($formatted, $sats, 'en_US', strict: true);  // '100000000'
+```
+
+Strict mode holds such a code to the rules ICU holds the codes it does carry to, so the two behave
+alike: the code where the locale puts the symbol and nowhere else, separated by the space the locale
+writes — a no-break one here — or by nothing at all, with the sign where the locale puts it. A plain
+space typed in its place, or the code written on the wrong side, is [lenient](#strict-mode)
+forgiveness rather than something strict parsing accepts:
+
+```php
+MoneyFormatter::parseToMinor('1000SATS 1.00000000', $sats, 'en_US');               // '100000000'
+MoneyFormatter::parseToMinor('1.00000000 1000SATS', $sats, 'en_US');               // '100000000'
+MoneyFormatter::parseToMinor('1000SATS 1.00000000', $sats, 'en_US', strict: true); // ParserException
 ```
 
 The minor unit is read from the code, so it does not matter which object you hold: a bare
