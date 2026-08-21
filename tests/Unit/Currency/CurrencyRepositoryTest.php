@@ -241,3 +241,27 @@ it('takes the currency codes of a provider that keys them differently', function
         ->getCode()->toBe('USD')
         ->minorUnit->toBe(2);
 });
+
+// The exclusion was diffed against the provider's own keys and the codes were upper-cased after it,
+// so a provider that keys its currencies in lower case kept every currency the configuration
+// excluded: the code survived the diff, was upper-cased two lines later, and appeared in the
+// collection as if nothing had asked for it to be gone.
+it('excludes a currency from a provider that keys them differently', function (): void {
+    Config::set('larapara.currency_provider', LowerCasedCurrenciesProvider::class);
+    Config::set('larapara.available_currencies', []);
+    Config::set('larapara.excluded_currencies', ['USD']);
+
+    expect(CurrencyRepository::getAvailableCurrencies())->toHaveCount(0);
+});
+
+it('excludes a currency written the way the configuration happens to spell it', function (string $excluded): void {
+    Config::set('larapara.available_currencies', []);
+    Config::set('larapara.excluded_currencies', [$excluded]);
+
+    expect(CurrencyRepository::isValidCode('USD'))->toBeFalse()
+        ->and(CurrencyRepository::isValidCode('EUR'))->toBeTrue();
+})->with([
+    'the code itself' => ['USD'],
+    'lower case'      => ['usd'],
+    'padded'          => [' USD '],
+]);

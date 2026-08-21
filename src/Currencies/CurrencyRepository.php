@@ -110,6 +110,15 @@ class CurrencyRepository
         return [(int) $ttl, (int) $ttl];
     }
 
+    /**
+     * A code the way both sides of a lookup have to spell it, since a provider is free to key its
+     * currencies as it likes and a code in configuration is written by hand.
+     */
+    protected static function normalizeCode(string $code): string
+    {
+        return strtoupper(trim($code));
+    }
+
     #[Throws(BindingResolutionException::class)]
     #[Throws(UnsupportedCurrency::class)]
     protected static function loadAvailableCurrencies(): CurrencyCollection
@@ -128,28 +137,28 @@ class CurrencyRepository
             );
         }
 
-        if (! $availableCurrencies) {
-            $availableCurrencies = array_keys($currencies);
+        // Codes come from configuration and from the provider, so neither side can be trusted to be
+        // normalized. Both are keyed the same way before either is matched against the other, so
+        // neither the exclusion below nor the lookup further down can silently miss.
+        $currencies = array_change_key_case($currencies, CASE_UPPER);
 
-            // Filter out excluded currencies
-            $availableCurrencies = array_diff(
-                $availableCurrencies,
-                Config::get('larapara.excluded_currencies', [])
+        if (! $availableCurrencies) {
+            $excluded = array_map(
+                static fn (mixed $code): string => static::normalizeCode((string) $code),
+                (array) Config::get('larapara.excluded_currencies', []),
             );
+
+            $availableCurrencies = array_diff(array_keys($currencies), $excluded);
         }
 
         if (is_string($availableCurrencies)) {
             $availableCurrencies = explode(',', $availableCurrencies);
         }
 
-        // Codes come from configuration and from the provider, so neither side can be trusted to be
-        // normalized. Both are keyed the same way here so the lookup below cannot silently miss.
-        $currencies = array_change_key_case($currencies, CASE_UPPER);
-
         return new CurrencyCollection(
             Arr::mapWithKeys($availableCurrencies,
                 static function (string $currencyCode) use ($currencies): array {
-                    $currencyCode = strtoupper(trim($currencyCode));
+                    $currencyCode = static::normalizeCode($currencyCode);
 
                     if (! array_key_exists($currencyCode, $currencies)) {
                         throw new UnsupportedCurrency($currencyCode);
