@@ -103,7 +103,7 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `intl_currency_symbol`    | `MONEY_INTL_CURRENCY_SYMBOL`    | `false`                  | Use ISO 4217 codes (`USD`, `EUR`, `SEK`) instead of symbols (`$`, `€`, `kr`).                      |
 | `parse.strict`            | `MONEY_PARSE_STRICT`            | `false`                  | Accept only what the locale itself writes when parsing. See [strict mode](#strict-mode).           |
 | `currency_provider`       | –                               | `ISOCurrenciesProvider`  | Class that provides the currency list. See [custom currency lists](#custom-currency-lists).        |
-| `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of ISO codes. Comma separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `UnsupportedCurrency`. |
+| `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of codes the configured provider supplies — ISO by default, crypto codes with `load_crypto_currencies`, whatever a custom provider brings. Comma-separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `InvalidConfiguration`. |
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
 | `currency_column_suffix`  | `MONEY_CURRENCY_COLUMN_SUFFIX`  | `_currency`              | Suffix for the currency column belonging to an amount column.                                      |
 | `currency_cache.type`     | `MONEY_CURRENCY_CACHE`          | `flexible`               | `remember`, `flexible`, `forever` or `false` to disable.                                           |
@@ -172,6 +172,17 @@ UYW; crypto currencies carry eight. `MoneyCast` refuses an amount whose minor un
 represent rather than letting the database round it away, so raise the scale — in the config and in the
 column — or store amounts as integer minor units.
 
+A column given a scale of its own has to tell the cast the same, since the cast is the side that refuses
+the amount: `MoneyCast::class.':8'` beside `money('price', scale: 8)`. Told nothing, the cast refuses by
+`store.decimal_scale`, which turns down a satoshi the column has room for.
+
+The scale has to leave the column a digit for the amount itself, and `smallMoney()` holds six digits
+where the others hold twelve — so the eight decimals a crypto amount needs do not fit in a small column
+at all. A macro that would write such a column throws
+`Pelmered\LaraPara\Exceptions\InvalidColumnScale` rather than leaving it to the database: MySQL and
+PostgreSQL refuse `decimal(6, 8)`, while SQLite accepts it and every amount written to it, so a test
+suite on SQLite would have nothing to say about the migration production refuses.
+
 To add a currency column to an existing amount column, add it as nullable, backfill the rows you already
 have, and only then make it required:
 
@@ -210,6 +221,10 @@ protected function casts(): array
 }
 ```
 
+A column the migration gave a scale of its own takes that scale here too, so the cast refuses the amounts
+the column cannot hold and no others: `'price' => MoneyCast::class.':8'` beside
+`$table->money('price', scale: 8)`. See [migrations](#migrations).
+
 Reading gives you value objects:
 
 ```php
@@ -240,6 +255,11 @@ falling back to `default_currency`:
 $product->price = ['amount' => 5000, 'currency' => 'EUR'];
 $product->price = 5000; // Currency from the model's currency column, or the default currency
 ```
+
+A plain amount is whole minor units, as an int or a numeric string. Anything else — `'1234.56'`,
+`'twelve'` — throws `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than storing the int it
+casts to, which is the same rule the formatter holds. An amount a person typed is read by
+[`parseToMoney()`](#parsetomoney), which knows the scale of the currency.
 
 Currency codes are validated and upper-cased as they are written, by both casts. Writing a currency that
 `available_currencies` does not list throws `Pelmered\LaraPara\Exceptions\UnsupportedCurrency`, since
@@ -401,7 +421,9 @@ public static function formatFromMinor(
 - `$value`: minor units as an int or a numeric string, or `null`/`''` (returns an empty string).
   An amount that is not whole minor units — `'199.99'`, `'1,234'`, `'not a number'` — throws
   `Pelmered\LaraPara\Exceptions\InvalidAmount` rather than being truncated to a wrong amount.
-  For a `Money` object, use [`format()`](#format).
+  So does an amount above 2^53 minor units, which is what ICU renders through a double: it would be
+  written as a neighbouring amount, so it is refused instead. `formatShortFromMinor()` still
+  abbreviates it, being an approximation by intent. For a `Money` object, use [`format()`](#format).
 - `$currency`: a LaraPara `Currency` or a `Money\Currency`, which says how many minor units make a unit.
 - `$decimals`: how many decimals to write, defaulting to the minor unit of the currency, so ¥ amounts
   carry no decimals and BHD amounts carry three.
@@ -444,8 +466,9 @@ public static function formatNumber(
   [`parseToMinor()`](#parsetominor)'s job. `null` and `''` return an empty string, and anything else
   that is not a number throws `Pelmered\LaraPara\Exceptions\InvalidNumber` rather than rendering as
   nothing.
-- `$decimals`: how many decimals to write. Defaults to as many as the value has, which is what the locale
-  would print.
+- `$decimals`: how many decimals to write. Defaults to as many as the value has: every decimal of a
+  numeric string, since a string carries exactly the decimals it was written with, and up to fourteen
+  places of a float, which is where the noise of a binary representation starts.
 - `$significantDigits`: an alternative to `$decimals`, not a companion to it. Passing both throws.
 
 This formats the number it is given and scales nothing. A count of minor units means nothing without
@@ -459,6 +482,7 @@ MoneyFormatter::formatNumber(1234.56, 'en_US');        // 1,234.56
 MoneyFormatter::formatNumber('1234.56', 'en_US');      // 1,234.56
 MoneyFormatter::formatNumber(1234, 'en_US');           // 1,234
 MoneyFormatter::formatNumber(1234.5, 'en_US');         // 1,234.5
+MoneyFormatter::formatNumber(1234.5678, 'en_US');      // 1,234.5678 — however many it has
 MoneyFormatter::formatNumber(1234.56, 'de_DE');        // 1.234,56
 MoneyFormatter::formatNumber(1234.56, 'sv_SE');        // 1 234,56
 
@@ -469,6 +493,12 @@ MoneyFormatter::formatNumber(1234.56, 'en_US', significantDigits: 2); // 1,200
 MoneyFormatter::formatNumber(null, 'en_US');           // ''
 MoneyFormatter::formatNumber('not a number', 'en_US'); // InvalidNumber
 MoneyFormatter::formatNumber('1.234,56', 'en_US');     // InvalidNumber — that is a localized string
+
+// A double carries 53 bits of precision, and ICU renders through one, so a value needing more of them
+// is refused rather than rendered as the number a double happens to hold. Which is a ceiling rather
+// than a digit count: sixteen digits are exact below it, and refused above.
+MoneyFormatter::formatNumber('1234567890123456', 'en_US'); // 1,234,567,890,123,456 — exact
+MoneyFormatter::formatNumber('9007199254740993', 'en_US'); // InvalidNumber — past 2^53
 ```
 
 For an amount without a currency symbol — which is what a minor-unit value usually wants — use
@@ -794,10 +824,10 @@ Both rules pass an empty value, so `required` and `nullable` stay in charge of w
 Validates that a string is an amount `parseToMinor()` can read, in the same locale and under the same rules.
 
 ```php
-new MoneyString(
-    Currency|MoneyCurrency|string|null $currency = null,  // defaults to config('larapara.default_currency')
-    ?string $locale = null,                               // defaults to app()->getLocale()
-    ?bool $strict = null,                                 // defaults to config('larapara.parse.strict')
+public function __construct(
+    mixed $currency = null,    // a Currency, a Money\Currency or a code; defaults to config('larapara.default_currency')
+    ?string $locale = null,    // defaults to app()->getLocale()
+    ?bool $strict = null,      // defaults to config('larapara.parse.strict')
 )
 ```
 
@@ -815,7 +845,8 @@ it was given — *"The price field must be a valid amount, such as 1 234,56."*
 Whether the currency itself is supported is `SupportedCurrency`'s business: an unsupported one here does not
 fail the amount, because the scale of a currency does not decide whether a string is a number. That way a bad
 currency and a bad amount each report their own problem, and passing `$request->input('price_currency')`
-straight in cannot turn into an exception.
+straight in cannot turn into an exception — the parameter is `mixed` for that reason, since a client is free
+to send an array where a code was expected, and anything that is not a code is read as the default currency.
 
 ### `SupportedCurrency`
 
@@ -924,28 +955,54 @@ A crypto currency list ships with the package, but is not loaded by default:
 MONEY_LOAD_CRYPTO_CURRENCIES=true
 ```
 
-Support for them is partial, since crypto currencies are not part of ISO 4217 and `intl` has no data for
-them. `Currency::fromCode('BTC')` works and gives you the right minor unit (8), and `getFormattingRules()`
-returns the currency code as the symbol and its eight fraction digits, but formatting an amount *with* a
-currency symbol through `formatFromMinor()` or `format()` throws `Money\Exception\UnknownCurrencyException`.
-
-Everything else works, because the symbol is the only part ICU needs its own data for. Leave it out and
-add your own:
+Crypto currencies are not part of ISO 4217, so their minor unit comes from the package's own registry
+rather than from ICU — `Currency::fromCode('BTC')` gives you the right one (8), and formatting and parsing
+both scale by it:
 
 ```php
 // 100000000 minor units = 1 BTC
-MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false).' BTC';
-// 1.00000000 BTC
-```
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US');
+// BTC 1.00000000
 
-`parseToMinor()` reads it back the same way, scaling by the minor unit of the currency you pass:
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
+// 1.00000000
 
-```php
 MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
 ```
 
-Pass a bare `Money\Currency` rather than a LaraPara `Currency` and there is no minor unit to read, so
-both directions fall back to two decimals.
+ICU has no *symbol* for a currency outside ISO 4217, so it writes the code where the symbol would go and
+places it the way the locale places a symbol. That is the only part of the output crypto support is
+missing, and it is what `getFormattingRules()->currencySymbol` reports too.
+
+The code comes out in full whatever its length. ICU carries a currency as a three-character code —
+truncating a longer one and refusing a shorter one — so the 181 bundled codes that are not three
+characters (`1000SATS`, `AUCTION`, `AI`) are handed to it as the symbol instead, which is the same thing
+it writes for the rest. Parsing reads that notation back in strict mode as well as lenient, since it is
+what this package writes and ICU has no reading of these codes to be strict about:
+
+```php
+$sats      = Currency::fromCode('1000SATS');
+$formatted = MoneyFormatter::formatFromMinor(100000000, $sats, 'en_US'); // 1000SATS 1.00000000
+
+MoneyFormatter::parseToMinor($formatted, $sats, 'en_US', strict: true);  // '100000000'
+```
+
+Strict mode holds such a code to the rules ICU holds the codes it does carry to, so the two behave
+alike: the code where the locale puts the symbol and nowhere else, separated by the space the locale
+writes — a no-break one here — or by nothing at all, with the sign where the locale puts it. A plain
+space typed in its place, or the code written on the wrong side, is [lenient](#strict-mode)
+forgiveness rather than something strict parsing accepts:
+
+```php
+MoneyFormatter::parseToMinor('1000SATS 1.00000000', $sats, 'en_US');               // '100000000'
+MoneyFormatter::parseToMinor('1.00000000 1000SATS', $sats, 'en_US');               // '100000000'
+MoneyFormatter::parseToMinor('1000SATS 1.00000000', $sats, 'en_US', strict: true); // ParserException
+```
+
+The minor unit is read from the code, so it does not matter which object you hold: a bare
+`Money\Currency` is looked up in the registry the same way a LaraPara `Currency` carries it. A code no
+currency list has — one you built a `Money\Currency` for by hand — has nothing to read, and falls back to
+two decimals in both directions.
 
 The crypto list carries no names of its own, so `Currency::name` is the code for those — `BTC - BTC` in a
 select array.
@@ -997,6 +1054,13 @@ They are also wired into Laravel's optimization commands, so `php artisan optimi
 `php artisan optimize:clear` take care of the currency cache as well.
 
 Set `MONEY_CURRENCY_CACHE=false` to disable caching, for example while developing a custom provider.
+
+Within a single process the list is also held in memory, since reading a money attribute resolves the
+scale of its amount through it — a page of a thousand rows would otherwise be a thousand round trips to
+the cache store. It is held against the configuration it was built from, so changing
+`available_currencies`, `excluded_currencies`, `load_crypto_currencies` or `currency_provider` at
+runtime builds the list that configuration asks for. `CurrencyRepository::clearCache()` drops it, which
+is what `money:clear` and `money:cache` both call.
 
 ## Using LaraPara with Filament
 

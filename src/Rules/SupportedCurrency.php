@@ -6,9 +6,7 @@ namespace Pelmered\LaraPara\Rules;
 
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
-use Money\Currency as MoneyCurrency;
 use Pelmered\LaraPara\Currencies\Currency;
-use Pelmered\LaraPara\Currencies\CurrencyRepository;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Param;
 use PhpStaticAnalysis\Attributes\Throws;
@@ -39,21 +37,17 @@ class SupportedCurrency implements ValidationRule
             return;
         }
 
-        $currencyCode = match (true) {
-            $value instanceof Currency, $value instanceof MoneyCurrency => $value->getCode(),
-            is_string($value), $value instanceof \Stringable            => (string) $value,
-            default                                                     => null,
-        };
-
-        if ($currencyCode === null) {
-            $fail('larapara::validation.supported_currency')->translate();
-
-            return;
+        try {
+            // The same normalization the casts apply on write, so anything this rule passes can be
+            // stored. Currency objects stringify to their code, so one type guard reads them all.
+            $currencyCode = is_string($value) || $value instanceof \Stringable
+                ? Currency::toCode($value)
+                : null;
+        } catch (UnsupportedCurrency) {
+            $currencyCode = null;
         }
 
-        $currencyCode = strtoupper(trim($currencyCode));
-
-        $isSupported = CurrencyRepository::isValidCode($currencyCode)
+        $isSupported = $currencyCode !== null
             && ($this->currencyCodes === null || in_array($currencyCode, $this->currencyCodes, true));
 
         if (! $isSupported) {

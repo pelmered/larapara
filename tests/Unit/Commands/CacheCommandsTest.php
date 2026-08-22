@@ -30,6 +30,10 @@ test('clear cache command runs successfully', function (): void {
     config(['larapara.currency_cache.type' => 'remember']);
     config(['larapara.currency_cache.ttl' => '500']);
 
+    // Cleared before it is filled, since the currencies are memoized for the life of the process:
+    // a read only reaches the cache store when the memo has nothing for this configuration.
+    CurrencyRepository::clearCache();
+
     $currencies = CurrencyRepository::getAvailableCurrencies();
 
     expect(Cache::has('larapara_currencies'))->toBeTrue();
@@ -74,4 +78,27 @@ test('cache command in verbose mode shows currency table', function (): void {
             $tableData
         )
         ->assertExitCode(0);
+});
+
+// The command only read the currencies, and a read writes through the cache on a miss alone: a
+// `flexible` entry that was still fresh came back as it stood, so `php artisan optimize` after a
+// configuration change reported the currencies from before it as the ones it had just cached.
+test('cache command replaces an entry that is still fresh', function (): void {
+    config([
+        'larapara.currency_cache.type'  => 'flexible',
+        'larapara.currency_cache.ttl'   => [2592000, 31556926],
+        'larapara.available_currencies' => ['USD', 'EUR'],
+    ]);
+
+    CurrencyRepository::clearCache();
+
+    expect(CurrencyRepository::getAvailableCurrencies())->toHaveCount(2);
+
+    config(['larapara.available_currencies' => ['USD', 'EUR', 'SEK']]);
+
+    test()->artisan('money:cache')
+        ->expectsOutputToContain('3 Currencies cached.')
+        ->assertExitCode(0);
+
+    expect(Cache::get(CurrencyRepository::CACHE_KEY))->toHaveCount(3);
 });

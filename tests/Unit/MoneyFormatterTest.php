@@ -347,6 +347,26 @@ it('gets the formatting rules of the default locale for an empty locale', functi
         ->toEqual(MoneyFormatter::getFormattingRules(Locale::getDefault(), $currency));
 });
 
+// Formatters are kept under the locale they were built for, so an empty locale has to be resolved
+// before it becomes that key: otherwise the first call freezes whatever the default was then, which
+// a long-running process is free to change between calls.
+it('follows the default locale when it changes, for an empty locale', function (): void {
+    $currency = Currency::fromCode('USD');
+    $default  = Locale::getDefault();
+
+    try {
+        Locale::setDefault('en_US');
+        expect(MoneyFormatter::formatFromMinor(123456, $currency, ''))
+            ->toBe(MoneyFormatter::formatFromMinor(123456, $currency, 'en_US'));
+
+        Locale::setDefault('sv_SE');
+        expect(MoneyFormatter::formatFromMinor(123456, $currency, ''))
+            ->toBe(MoneyFormatter::formatFromMinor(123456, $currency, 'sv_SE'));
+    } finally {
+        Locale::setDefault($default);
+    }
+});
+
 // ICU locale keywords only accept 3 character currency codes, so longer ones fall back to the
 // currency of the locale's region unless we short circuit them.
 it('gets the formatting rules of a currency ICU does not know', function (): void {
@@ -425,6 +445,16 @@ it('refuses a value that is not a number', function (mixed $value): void {
     'a localized one' => ['1.234,56'],
 ]);
 
+// A value that is not a number is usually input that was never validated, and the message it lands in
+// goes to the log, so the message names the type it was given rather than repeating the value.
+it('keeps the rejected value out of the exception message', function (): void {
+    $value = 'not-a-number';
+
+    expect(InvalidNumber::notNumeric($value)->getMessage())
+        ->not->toContain($value)
+        ->toContain('string');
+});
+
 it('formats nothing as nothing', function (mixed $value): void {
     expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe('');
 })->with([
@@ -461,6 +491,22 @@ it('keeps the decimals of the number unless asked for others', function (mixed $
     'more than three'   => [1234.56789, 5, '1,234.56789'],
 ]);
 
+// ICU stops at three fraction digits of its own accord, so the decimals of the value were kept only
+// as long as it had no more than three of them: nothing asked for 1234.5678 to be written as
+// 1,234.568, or for a tenth of a cent to be written as 0.
+it('keeps the decimals of the number past the third', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'four decimals'          => [1234.5678, '1,234.5678'],
+    'four decimals as text'  => ['1234.5678', '1,234.5678'],
+    'eight, a crypto amount' => [1.23456789, '1.23456789'],
+    'below the third'        => [0.00001234, '0.00001234'],
+    // The noise of the binary representation is absorbed rather than written out: 1.005 is held as
+    // 1.00499999999999989, and a tenth plus two tenths as 0.30000000000000004.
+    'a value a double rounds' => [1.005, '1.005'],
+    'a sum a double rounds'   => [0.1 + 0.2, '0.3'],
+]);
+
 // A Money carries its own currency, and its amount is the minor units of that currency — the two
 // entry points are the same amount either way round.
 it('formats a Money object and its amount alike', function (): void {
@@ -481,3 +527,37 @@ it('abbreviates a Money object by its own currency', function (): void {
 
     expect(MoneyFormatter::formatShort($yen, 'en_US'))->toBe('¥123.46M');
 });
+
+// A double carries fifteen significant decimal digits and ICU takes a double, so a value written with
+// more of them was rendered as a different number with nothing said about it: '9007199254740993' came
+// out as 9,007,199,254,740,992. Refused rather than deformed, as everything else here is.
+it('refuses a number a double cannot carry digit for digit', function (mixed $value): void {
+    expect(fn (): string => MoneyFormatter::formatNumber($value, 'en_US'))->toThrow(InvalidNumber::class);
+})->with([
+    'past what a double holds' => ['9007199254740993'],
+    'the same as an int'       => [9007199254740993],
+    'seventeen decimals'       => ['0.12345678901234567'],
+    'nineteen digits'          => ['1234567890123456789'],
+]);
+
+// The value rather than the count of its digits: a sixteen-digit number below 2**53 is carried
+// exactly, and a float is a double already, so nothing was lost on its way in to refuse it for.
+it('formats a number a double carries digit for digit', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'fifteen digits'         => ['999999999999999', '999,999,999,999,999'],
+    'sixteen, still exact'   => ['1234567890123456', '1,234,567,890,123,456'],
+    'zeros past the range'   => ['1000000000000000000', '1,000,000,000,000,000,000'],
+    'a float past the range' => [1.0e20, '100,000,000,000,000,000,000'],
+    'exponent notation'      => ['1.5e3', '1,500'],
+]);
+
+// A numeric string carries a known number of decimals, so all of them are kept — the fourteen places
+// that absorb the noise of a binary representation are what a float gets, which is what needs them.
+it('keeps every decimal a numeric string carries', function (mixed $value, string $expectedOutput): void {
+    expect(MoneyFormatter::formatNumber($value, 'en_US'))->toBe($expectedOutput);
+})->with([
+    'fifteen decimals'  => ['0.000000000000001', '0.000000000000001'],
+    'seventeen places'  => ['0.00000000000000123', '0.00000000000000123'],
+    'a float, absorbed' => [0.1 + 0.2, '0.3'],
+]);

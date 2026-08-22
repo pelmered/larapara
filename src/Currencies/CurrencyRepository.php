@@ -10,9 +10,11 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Pelmered\LaraPara\Currencies\Providers\CryptoCurrenciesProvider;
 use Pelmered\LaraPara\Currencies\Providers\ISOCurrenciesProvider;
+use Pelmered\LaraPara\Exceptions\InvalidConfiguration;
 use Pelmered\LaraPara\Exceptions\UnsupportedCurrency;
 use PhpStaticAnalysis\Attributes\Returns;
 use PhpStaticAnalysis\Attributes\Throws;
+use PhpStaticAnalysis\Attributes\Type;
 
 class CurrencyRepository
 {
@@ -26,6 +28,34 @@ class CurrencyRepository
      * across the range this package supports.
      */
     public const FLEXIBLE_CREATED_KEY_PREFIX = 'illuminate:cache:flexible:created:';
+
+    /**
+     * The cache types getAvailableCurrencies() writes through, which is what "the cache is
+     * enabled" means: any other type resolves the currencies uncached.
+     */
+    private const CACHE_TYPES = ['remember', 'flexible', 'forever'];
+
+    /**
+     * The currencies as this process last built them, and the configuration they were built from.
+     *
+     * The read path asks for the currencies once or twice per row — MoneyCast::get() resolves the
+     * scale of every amount through them — so without this a thousand rows with two money columns
+     * is a thousand round trips to the cache store, or a thousand rebuilds of the ISO list and the
+     * crypto one where the cache is off.
+     */
+    private static ?CurrencyCollection $memo = null;
+
+    #[Type('list<mixed>|null')]
+    private static ?array $memoConfig = null;
+
+    /**
+     * Whether getAvailableCurrencies() writes through the cache — the same question money:cache
+     * answers when it reports, so the two cannot drift.
+     */
+    public static function isCacheEnabled(): bool
+    {
+        return in_array(Config::get('larapara.currency_cache.type'), self::CACHE_TYPES, true);
+    }
 
     public static function isValid(Currency $currency): bool
     {
@@ -47,6 +77,15 @@ class CurrencyRepository
 
     public static function getAvailableCurrencies(): CurrencyCollection
     {
+        // Compared against the configuration the list was built from rather than kept for the life
+        // of the process outright, since changing that configuration — which an application may do
+        // per tenant, and the tests do constantly — has to build the list it now asks for.
+        $memoConfig = static::memoConfig();
+
+        if (self::$memo instanceof CurrencyCollection && self::$memoConfig === $memoConfig) {
+            return self::$memo;
+        }
+
         $config = Config::get('larapara.currency_cache', []);
         $ttl    = data_get($config, 'ttl', 0);
 
@@ -58,16 +97,37 @@ class CurrencyRepository
         // everything is a string, and each type takes a different shape of it. Passing the wrong
         // shape does not fail loudly — a string TTL is read one character at a time and an array one
         // becomes the int 1, so the cache quietly lives for seconds instead of months.
-        return match (data_get($config, 'type')) {
+        $currencies = match (data_get($config, 'type')) {
             'remember' => Cache::remember(static::CACHE_KEY, static::secondsTtl($ttl), $callback),
             'flexible' => Cache::flexible(static::CACHE_KEY, static::flexibleTtl($ttl), $callback),
             'forever'  => Cache::rememberForever(static::CACHE_KEY, $callback),
             default    => $callback(),
         };
+
+        self::$memoConfig = $memoConfig;
+
+        return self::$memo = $currencies;
+    }
+
+    /**
+     * The configuration the currency list is built from, which is what makes a memoized one stale.
+     */
+    #[Returns('list<mixed>')]
+    protected static function memoConfig(): array
+    {
+        return [
+            Config::get('larapara.currency_provider'),
+            Config::get('larapara.available_currencies'),
+            Config::get('larapara.excluded_currencies'),
+            Config::get('larapara.load_crypto_currencies'),
+        ];
     }
 
     public static function clearCache(): void
     {
+        self::$memo       = null;
+        self::$memoConfig = null;
+
         Cache::forget(static::CACHE_KEY);
 
         // The flexible type keeps the age of the entry under a companion key of its own.
@@ -95,8 +155,17 @@ class CurrencyRepository
         return [(int) $ttl, (int) $ttl];
     }
 
+    /**
+     * A code the way both sides of a lookup have to spell it, since a provider is free to key its
+     * currencies as it likes and a code in configuration is written by hand.
+     */
+    protected static function normalizeCode(string $code): string
+    {
+        return strtoupper(trim($code));
+    }
+
     #[Throws(BindingResolutionException::class)]
-    #[Throws(UnsupportedCurrency::class)]
+    #[Throws(InvalidConfiguration::class)]
     protected static function loadAvailableCurrencies(): CurrencyCollection
     {
         $currencyProvider    = Config::get('larapara.currency_provider', ISOCurrenciesProvider::class);
@@ -113,38 +182,42 @@ class CurrencyRepository
             );
         }
 
-        if (! $availableCurrencies) {
-            $availableCurrencies = array_keys($currencies);
+        // Codes come from configuration and from the provider, so neither side can be trusted to be
+        // normalized. Both are keyed the same way before either is matched against the other, so
+        // neither the exclusion below nor the lookup further down can silently miss.
+        $currencies = array_change_key_case($currencies, CASE_UPPER);
 
-            // Filter out excluded currencies
-            $availableCurrencies = array_diff(
-                $availableCurrencies,
-                Config::get('larapara.excluded_currencies', [])
+        if (! $availableCurrencies) {
+            $excluded = array_map(
+                static fn (mixed $code): string => static::normalizeCode((string) $code),
+                (array) Config::get('larapara.excluded_currencies', []),
             );
+
+            $availableCurrencies = array_diff(array_keys($currencies), $excluded);
         }
 
         if (is_string($availableCurrencies)) {
             $availableCurrencies = explode(',', $availableCurrencies);
         }
 
-        // Codes come from configuration and from the provider, so neither side can be trusted to be
-        // normalized. Both are keyed the same way here so the lookup below cannot silently miss.
-        $currencies = array_change_key_case($currencies, CASE_UPPER);
-
         return new CurrencyCollection(
             Arr::mapWithKeys($availableCurrencies,
                 static function (string $currencyCode) use ($currencies): array {
-                    $currencyCode = strtoupper(trim($currencyCode));
+                    $currencyCode = static::normalizeCode($currencyCode);
 
                     if (! array_key_exists($currencyCode, $currencies)) {
-                        throw new UnsupportedCurrency($currencyCode);
+                        // The configuration is wrong, rather than the code being unsupported: every
+                        // caller asking whether a code is supported catches UnsupportedCurrency to
+                        // answer no, so raising that here made one typo in available_currencies
+                        // report every currency — including the ones spelled correctly — as invalid.
+                        throw InvalidConfiguration::unknownCurrency($currencyCode);
                     }
 
                     return [
                         $currencyCode => new Currency(
                             $currencyCode,
-                            $currencies[$currencyCode]['currency'] ?? '',
-                            $currencies[$currencyCode]['minorUnit'],
+                            $currencies[$currencyCode]['currency']  ?? '',
+                            $currencies[$currencyCode]['minorUnit'] ?? null,
                         ),
                     ];
                 }

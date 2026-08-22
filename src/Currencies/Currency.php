@@ -21,7 +21,9 @@ class Currency implements \JsonSerializable, \Stringable
 
     public static function fromCode(string $currencyCode): self
     {
-        $currencyCode = strtoupper($currencyCode);
+        // The one place a string becomes a code, so the trimming and upper-casing every caller
+        // relies on live here rather than at each call site.
+        $currencyCode = strtoupper(trim($currencyCode));
 
         return CurrencyRepository::getAvailableCurrencies()->get($currencyCode)
                ?? throw new UnsupportedCurrency($currencyCode);
@@ -33,12 +35,8 @@ class Currency implements \JsonSerializable, \Stringable
     #[Throws(UnsupportedCurrency::class)]
     public static function toCode(self|MoneyCurrency|\Stringable|string $currency): string
     {
-        $currencyCode = match (true) {
-            $currency instanceof self, $currency instanceof MoneyCurrency => $currency->getCode(),
-            default                                                       => (string) $currency,
-        };
-
-        return static::fromCode(trim($currencyCode))->getCode();
+        // Every accepted representation stringifies to its code, Money\Currency included.
+        return static::fromCode((string) $currency)->getCode();
     }
 
     public static function fromMoneyCurrency(MoneyCurrency $currency): self

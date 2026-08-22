@@ -19,7 +19,7 @@ return [
         'format' => 'int', // Allowed values: 'int' or 'decimal'
 
         // Decimals a decimal column keeps, which is what the column macros give it and what an
-        // amount is refused for carrying more of. Most currencies needs only 2 so that might 
+        // amount is refused for carrying more of. Most currencies needs only 2 so that might
         // be enough if you want to optimize. Three covers all ISO currencies except
         // CLF and UYW that needs 4
         // Crypto currencies needs up to 8
@@ -52,12 +52,12 @@ return [
     | Strict parsing
     |---------------------------------------------------------------------------
     |
-    | MoneyFormatter::parseDecimal() forgives a separator that is out of place:
+    | MoneyFormatter::parseToMinor() forgives a separator that is out of place:
     | a dot is read as the decimal separator of the locale, and a grouping
     | separator out of position is dropped. Set this to true to accept only
     | what the locale itself writes, and throw for anything else.
     |
-    | Every parseDecimal() call takes a `strict` argument that overrides this,
+    | Every parseToMinor() call takes a `strict` argument that overrides this,
     | so a lenient form and a strict import can live in the same application.
     |
     */
@@ -138,6 +138,9 @@ return [
     | Supported values are:
     | - 'Pelmered\LaraPara\Currencies\Currency::class' (default and recommended)
     | - 'Money\Currency::class'
+    |
+    | This chooses the object a read hands back, not whether the code is validated: either way a
+    | code 'available_currencies' does not list throws UnsupportedCurrency when the row is read.
     */
     'currency_cast_to' => env('MONEY_CURRENCY_CAST', Currency::class),
 ];

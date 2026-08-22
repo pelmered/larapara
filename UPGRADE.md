@@ -35,6 +35,10 @@ which is the default, was never affected.
   `1998` instead of `1999`. Nothing needs migrating — the column always held the right value — but any
   figure your application copied out of a read is a cent short.
 
+  The read moves the decimal point rather than multiplying, the way the write places it, so an amount a
+  double cannot hold exactly — above 2\*\*53 minor units, which needs a wider column than the macros
+  write — comes back as it went in rather than a unit or two off.
+
 - **Assigning `null` to a nullable money column now stores `NULL`.** It used to store `0.000`, so "no price
   set" and "free" were indistinguishable. If you have rows that were meant to be null, they are zeros in
   the column now and only you can tell which is which.
@@ -104,7 +108,10 @@ named for what it takes:
 - `formatFromMinor()` is the old `format()`: the same arguments, minus the `Money` it no longer accepts,
   and named for the unit it takes — neither `format` nor `formatAmount` said that 123456 means $1,234.56.
 - `formatNumber()` scales nothing: `formatNumber(1234.56, 'en_US')` is `1,234.56` and
-  `formatNumber(1234, 'en_US')` is `1,234.00`. Its `$minorDecimals` parameter is gone, and so is the
+  `formatNumber(1234, 'en_US')` is `1,234`. It keeps the decimals the value has rather than the three
+  ICU's own default stops at — `formatNumber(1234.5678, 'en_US')` is `1,234.5678` — as far as a double
+  carries them: a value needing more precision than its 53 bits throws `InvalidNumber` rather than being
+  rendered as the number a double happens to hold. Its `$minorDecimals` parameter is gone, and so is the
   `minorUnits` argument and the `number_format.minor_units` config key of the previous iteration.
 
 ```php
@@ -195,21 +202,75 @@ forgiveness, so strict mode refuses it.
 
 ## An amount in a currency outside ISO 4217 formats and parses
 
-`formatFromMinor(..., showCurrencySymbol: false)` used to throw `UnknownCurrencyException` for a crypto
-currency, because it placed the decimal point from ISO 4217 data. The symbol is the only part that needs
-ICU's data for the currency, so without it the minor unit of the currency is enough:
+Formatting a crypto currency used to throw `UnknownCurrencyException`, because the decimal point was
+placed from ISO 4217 data alone. The minor unit of the currency is placed alongside it now, in both
+directions, so the round trip holds for those currencies too:
 
 ```php
+MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US');
+// BTC 1.00000000
+
 MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US', showCurrencySymbol: false);
 // 1.00000000
 
 MoneyFormatter::parseToMinor('1.00000000', Currency::fromCode('BTC'), 'en_US'); // '100000000'
 ```
 
-`parseToMinor()` scales by the same minor unit, so the round trip holds for those currencies too. This
-also fixes the `MoneyString` validation rule, which raised `UnknownCurrencyException` out of the parser
-for a crypto currency instead of reporting a validation failure. Formatting *with* a symbol still throws:
-ICU has no symbol to give.
+ICU has no *symbol* for such a currency, so it writes the code where the symbol would go — which is all
+that crypto support is missing, rather than the exception it used to be. This also fixes the `MoneyString`
+validation rule, which raised `UnknownCurrencyException` out of the parser for a crypto currency instead
+of reporting a validation failure.
+
+The code is written in full however long it is. ICU carries a currency as a three-character code, so it
+truncated the 170 bundled codes that are longer — `1000SATS` came out as `100`, an amount labelled as a
+currency it is not — and threw a `TypeError` out of the money library for the 11 that are shorter. Such a
+code is handed to ICU as the currency's symbol now, which is what it writes for a currency outside
+ISO 4217 anyway, and `parseToMinor()` reads that notation back in strict mode as well.
+
+Strict mode holds such a code to the same rules as one ICU carries: the code where the locale puts the
+symbol, separated by the space of the locale or by nothing, and the sign where the locale puts it — which
+for `en_US` is before the code, so a negative amount in such a currency now reads back at all. A plain
+space where the locale writes a no-break one, or the code on the wrong side of the number, is forgiven
+leniently and refused strictly, exactly as it is for `USD`.
+
+## Formatting refuses a value a double cannot carry
+
+ICU renders through a double, which carries 53 bits of precision, and so did every format
+call here — silently. `formatNumber('9007199254740993', 'en_US')` returned `9,007,199,254,740,992`, and
+an amount of `900719925474099301` minor units in USD was written as `$9,007,199,254,740,994.00`: a dollar
+away from an amount the casts store and read back exactly.
+
+Such a value now throws `Pelmered\LaraPara\Exceptions\InvalidNumber` from `formatNumber()` and
+`Pelmered\LaraPara\Exceptions\InvalidAmount` from `formatFromMinor()` and `format()`, rather than being
+rendered as the neighbouring number a double happens to hold. The value decides it, not the count of its
+digits: a sixteen-digit amount below 2^53 is carried exactly, and so is one written with trailing zeros.
+`formatShortFromMinor()` still abbreviates any amount, being an approximation by intent.
+
+`formatNumber()` also keeps every decimal a numeric string carries, rather than the fourteen places that
+absorb the noise of a float: `formatNumber('0.000000000000001', 'en_US')` is that number, not `0`.
+
+## A currency's minor unit is read from its code
+
+Only a LaraPara `Currency` carried a minor unit, so a bare `Money\Currency` outside ISO 4217 was read at
+two decimals: `parseToMoney('1.00000000', new Money\Currency('BTC'), 'en_US')` gave 100 minor units where
+the same call with `'BTC'` gave 100000000 — the same amount a factor of a million apart, decided by which
+object the caller happened to hold. The code is looked up in the registry now, so every way of naming a
+currency reads and writes the same amount. A code no currency list has still falls back to two decimals,
+since nothing knows any better.
+
+## `CurrencyFormattingRules` moved to the `Currencies` namespace
+
+`MoneyFormatter::getFormattingRules()` returns the same object, from a new namespace:
+
+```php
+-use Pelmered\LaraPara\MoneyFormatter\CurrencyFormattingRules;
++use Pelmered\LaraPara\Currencies\CurrencyFormattingRules;
+```
+
+It describes a currency rather than the formatter that reads it, and it sits beside `Currency` now. Code
+that only calls `getFormattingRules()` and reads its properties needs no change; an import, a type
+declaration or a `new` of the old name fails with a class-not-found error, and there is no alias left
+behind at the old name.
 
 ## The currency column is never nullable
 
@@ -249,6 +310,21 @@ and a `scale` argument on each macro. An amount whose minor units the scale cann
 carry four minor units, and every crypto currency carries eight. Raise the scale in the config and in the
 column, pass `scale:` to the macro, or store amounts as integer minor units.
 
+A column given its own scale has to tell the cast the same — `MoneyCast::class.':8'` beside
+`money('price', scale: 8)` — since the cast is the side that refuses the amount. Told nothing, it refuses
+by `store.decimal_scale` whatever the column holds.
+
+A negative scale is refused too, wherever it is named — the config key, the `scale:` argument or the cast
+parameter. It used to reach the column as `decimal(12, -1)`, which MySQL rejects, and the cast moved the
+point the wrong way rather than refusing: `$1,230.00` was stored as `1.23`, a thousandth of the amount,
+while `$1,234.56` threw. A scale is a count of decimals, so it starts at zero.
+
+A scale that leaves the column no digits for the amount itself is refused with
+`Pelmered\LaraPara\Exceptions\InvalidColumnScale` as the migration is built. `smallMoney()` holds six
+digits, so `store.decimal_scale = 8` — the setting a crypto project is told to use — used to write
+`decimal(6, 8)`: a column MySQL and PostgreSQL reject and SQLite silently accepts. Use `money()` for
+those columns, or keep the small ones on integer storage.
+
 `MoneyCast::set()` also writes the decimal by placing the point rather than by dividing, so the value
 reaching the column is a numeric string instead of a float and an amount larger than a double holds
 exactly is no longer deformed.
@@ -280,7 +356,7 @@ If your application writes a currency it does not list — a crypto code without
 ## `available_currencies` is normalized
 
 Codes from the config are trimmed and upper-cased before use, so `MONEY_AVAILABLE_CURRENCIES="USD, EUR"`
-works. A code the currency provider does not know now throws `UnsupportedCurrency` naming that code,
+works. A code the currency provider does not know now throws `InvalidConfiguration` naming that code,
 instead of `ErrorException: Undefined array key` on the first currency read.
 
 ## Formatting refuses an amount that is not whole minor units
@@ -288,6 +364,75 @@ instead of `ErrorException: Undefined array key` on the first currency read.
 Formatting cast its input to an int, so `'199.99'` rendered as `$1.99` and `'not a number'` as `$0.00`.
 Anything that is not whole minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`. If you
 were passing a major-unit amount, multiply it by the minor unit first, or use `formatNumber()`.
+
+## Storing an amount refuses what is not whole minor units
+
+`MoneyCast` cast its input to an int, the way formatting used to, so `$post->price = '1234.56'` stored
+1234 — $12.34 for the amount that was written — and `'twelve'` stored 0. An amount that is not whole
+minor units now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`, the same rule the formatter
+holds, since both are given the same amounts:
+
+```php
+$post->price = 123456;      // unchanged
+$post->price = '123456';    // unchanged: a numeric string of minor units
+$post->price = '1234.56';   // InvalidAmount, where it used to store 1234
+
+// A major-unit amount from a request is read by the parser, which knows the currency's scale:
+$post->price = MoneyFormatter::parseToMoney($request->input('price'), $currency, app()->getLocale());
+```
+
+## Storing an amount refuses one larger than an integer holds
+
+A `Money` carries its amount as a string and the money library counts in arbitrary precision, so an
+amount can be larger than the integer a column stores — `$money->multiply()` on a large amount reaches
+one easily. `MoneyCast` cast it to an int, which clamps: `99999999999999999999` was stored as
+`9223372036854775807` in an integer column and as `92233720368547758.07` in a decimal one, both
+silently, and neither the amount that was written.
+
+Such an amount now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`, the same way reading a
+column holding one does. `PHP_INT_MAX` minor units is still stored — about 92 quadrillion units of a
+two-decimal currency — so this only reaches an application counting in a unit far smaller than the
+amounts it holds.
+
+## `currency_cast_to` chooses the object, not whether the code is validated
+
+With `currency_cast_to = Money\Currency::class`, `CurrencyCast` built the object straight from the
+column and validated nothing. A row holding a code `available_currencies` does not list therefore read
+cleanly and failed later, out of `CurrencyCast::set()` — which Eloquent calls to merge a cast attribute
+back into the model — so `toArray()`, `save()` and `getAttributes()` threw on a row whose attribute was
+fine, and the exception came from the write path of a read.
+
+Both casts now resolve the code through the registry, as `Currency::class` always did: an unlisted code
+throws `UnsupportedCurrency` on the first read of the row, naming the code. If you were relying on
+reading codes the configuration does not list, add them to `available_currencies` (or a custom
+`currency_provider`). A stored code is also normalized on the way out now, so a column holding `'sek'`
+reads back as `'SEK'`.
+
+## A misconfigured `available_currencies` entry throws `InvalidConfiguration`
+
+A code in `available_currencies` that the currency provider does not have raised
+`UnsupportedCurrency`, which is also what "this code is not one of the configured currencies" means —
+and every caller asking that question catches it to answer no. So one typo made
+`CurrencyRepository::isValidCode()` return `false` for every code, and the `SupportedCurrency` rule
+report a correctly spelled `USD` as unsupported, with nothing naming the entry that was wrong.
+
+That case now throws `Pelmered\LaraPara\Exceptions\InvalidConfiguration`, which no such caller
+catches, so it reaches you naming the entry. Catch it alongside `UnsupportedCurrency` if you were
+handling a misconfigured registry yourself; both extend `RuntimeException`.
+
+## A currency provider decides the minor unit of the currencies it supplies
+
+`getMinorUnit()` consulted ISO 4217 before the configured registry, so a custom `currency_provider`
+was honoured for a currency's existence and its name but not for its scale: a provider declaring USD
+with four decimals — what per-unit pricing needs — still formatted, parsed and stored amounts two
+decimals wide. The same ordering sat inside the currency data handed to the money library, so even an
+explicit minor unit lost to ISO there.
+
+The currency's own minor unit now wins, with ISO 4217 behind it for a currency that names none — one
+built by hand, or a code the registry does not list. Nothing changes for the bundled providers, which
+carry the ISO minor units already. If you supply a provider that disagrees with ISO on a currency's
+scale, note that this now reaches storage: `MoneyCast` reads its scale through the same resolver, so
+check `store.decimal_scale` and your column against it.
 
 ## `MoneyFormatter::parseToMinor()` rejects what it used to truncate
 
@@ -327,7 +472,7 @@ Negative amounts are abbreviated now instead of always being formatted in full, 
 ## `formatFromMinor(..., showCurrencySymbol: false)` uses the minor unit of the currency
 
 It divided by a hardcoded 100 whatever the currency, so
-`formatFromMinor(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234.00`. A currency
+`formatFromMinor(1234, JPY, showCurrencySymbol: false)` gave `12.34` and now gives `1,234`. A currency
 outside ISO 4217 works here too — see the section on that above.
 
 ## `formatNumber()` with negative decimals
@@ -444,6 +589,9 @@ MONEY_AVAILABLE_CURRENCIES=USD,EUR,GBP
 #### Example:
 ```php
 MoneyFormatter::formatAsDecimal(123456, Currency::fromCode('USD')); // Output: $1,234.56
-// should be changed to:
-MoneyFormatter::formatNumber(123456, 'en_US'); // Output: 1,234.56
+// should be changed to formatFromMinor() without the symbol, which scales by the minor unit of the
+// currency it is given — a fixed division by 100 is wrong for JPY (0 decimals) and BHD (3):
+MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1,234.56
+// formatNumber() is the replacement where the value is a plain number rather than minor units:
+MoneyFormatter::formatNumber(1234.56, 'en_US'); // Output: 1,234.56
 ```

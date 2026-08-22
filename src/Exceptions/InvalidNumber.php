@@ -11,9 +11,22 @@ class InvalidNumber extends InvalidArgumentException
     public static function notNumeric(mixed $value): self
     {
         return new self(
-            'The value '.var_export($value, true).' is not a number. '
+            'The given '.get_debug_type($value).' is not a number. '
             .'MoneyFormatter::formatNumber() takes an int, a float or a numeric string; '
             .'a string written the way a locale writes it is read by parseToMinor().'
+        );
+    }
+
+    /**
+     * The value is left out of the message: a number carrying sixteen digits is as often a card
+     * number pasted into a field as it is an amount, and this message goes to the log.
+     */
+    public static function exceedsDoublePrecision(): self
+    {
+        return new self(
+            'The given number carries more significant digits than a double holds, and formatting '
+            .'renders it through one, so what came out would be a different number. Fifteen '
+            .'significant digits are carried exactly: round the value to that, or keep it as text.'
         );
     }
 

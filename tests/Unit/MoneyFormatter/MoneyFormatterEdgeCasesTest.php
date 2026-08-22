@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use Money\Exception\UnknownCurrencyException;
+use Money\Exception\ParserException;
+use Money\Money;
 use Pelmered\LaraPara\Currencies\Currency;
 use Pelmered\LaraPara\Exceptions\InvalidAmount;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
@@ -132,16 +133,35 @@ it('formats and parses a currency outside ISO 4217', function (): void {
         ->and(MoneyFormatter::parseToMinor('0.00000001', $btc, 'en_US'))->toBe('1');
 });
 
-// A currency symbol is the one thing ICU cannot supply for a currency it has no data for.
-it('still refuses to put a symbol on a currency outside ISO 4217', function (): void {
+// ICU writes the code where it has no symbol, so the only thing that ever stood in the way was the
+// formatter being handed ISO 4217 alone to place the decimal point by.
+it('puts the code on a currency outside ISO 4217', function (): void {
     config([
         'larapara.load_crypto_currencies' => true,
         'larapara.available_currencies'   => ['USD', 'BTC'],
     ]);
 
-    expect(fn (): string => MoneyFormatter::formatFromMinor(100000000, Currency::fromCode('BTC'), 'en_US'))
-        ->toThrow(UnknownCurrencyException::class);
+    $btc = Currency::fromCode('BTC');
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(100000000, $btc, 'en_US')))
+        ->toBe('BTC 1.00000000')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::format(new Money('100000000', $btc->toMoneyCurrency()), 'en_US')))
+        ->toBe('BTC 1.00000000')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor(123456789000, $btc, 'en_US')))
+        ->toBe('BTC 1.23K');
 });
+
+// The aggregate is ISO first, so a currency ISO covers is placed by ISO's data either way.
+it('places an ISO currency by ISO data', function (string $currency, int $value, string $expectedOutput): void {
+    config(['larapara.available_currencies' => ['USD', 'JPY', 'BHD']]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor($value, Currency::fromCode($currency), 'en_US')))
+        ->toBe($expectedOutput);
+})->with([
+    'two minor units'   => ['USD', 123456, '$1,234.56'],
+    'no minor units'    => ['JPY', 1234, '¥1,234'],
+    'three minor units' => ['BHD', 1234567, 'BHD 1,234.567'],
+]);
 
 // Strict parsing accepts only what the locale itself writes, which is what the formatter writes, so
 // the round trip holds in strict mode too — including the locales whose separators are not typeable.
@@ -156,4 +176,225 @@ it('parses back what it formats in strict mode', function (string $currency, str
     'euro, dot grouping'       => ['EUR', 'de_DE'],
     'yen, no minor unit'       => ['JPY', 'ja_JP'],
     'dinar, three minor units' => ['BHD', 'ar_BH'],
+]);
+
+// ICU carries a currency as a three-character code: it truncates a longer one to its first three
+// characters and refuses a shorter one outright. The bundled crypto list has 181 of them, so
+// 1000SATS came out as "100" — an amount labelled as a currency it is not counted in.
+it('writes a currency code ICU cannot carry as it is', function (string $currency, string $expectedOutput): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS', 'AUCTION', '1INCH', 'AI', 'BTC'],
+    ]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(100000000, Currency::fromCode($currency), 'en_US')))
+        ->toBe($expectedOutput);
+})->with([
+    'digits at the front'     => ['1000SATS', '1000SATS 1.00000000'],
+    'seven characters'        => ['AUCTION', 'AUCTION 1.00000000'],
+    'five characters'         => ['1INCH', '1INCH 1.00000000'],
+    'shorter than a code'     => ['AI', 'AI 1.00000000'],
+    'three characters, as is' => ['BTC', 'BTC 1.00000000'],
+]);
+
+// The code stands in for the symbol, so ICU still decides where it goes, what space it is separated
+// by and which digits and directional marks the locale writes.
+it('places a currency code ICU cannot carry the way the locale places a symbol', function (string $locale, string $expectedOutput): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    $sats = Currency::fromCode('1000SATS');
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(-123456789, $sats, $locale)))
+        ->toBe($expectedOutput);
+})->with([
+    'symbol in front'  => ['en_US', '-1000SATS 1.23456789'],
+    'symbol behind'    => ['de_DE', '-1,23456789 1000SATS'],
+    'minus of its own' => ['sv_SE', '−1,23456789 1000SATS'],
+]);
+
+// Every entry point that writes a currency, since each reaches ICU by a different route: a Money
+// through the formatter of the money library, an abbreviation through a pattern of its own, and the
+// ISO code where the configuration asks for codes rather than symbols.
+it('writes a currency code ICU cannot carry from every entry point', function (): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    $sats = Currency::fromCode('1000SATS');
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::format(new Money('100000000', $sats->toMoneyCurrency()), 'en_US')))
+        ->toBe('1000SATS 1.00000000')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor(123456789000, $sats, 'en_US')))
+        ->toBe('1000SATS 1.23K')
+        ->and(replaceNonBreakingSpaces(MoneyFormatter::formatShort(new Money('123456789000', $sats->toMoneyCurrency()), 'en_US')))
+        ->toBe('1000SATS 1.23K');
+
+    config(['larapara.intl_currency_symbol' => true]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatFromMinor(100000000, $sats, 'en_US')))
+        ->toBe('1000SATS 1.00000000');
+});
+
+// A parser that refuses its own output is a trap, and ICU has no reading of these codes to be strict
+// about, so the notation the formatter writes is read back in both modes.
+it('parses back a currency code ICU cannot carry', function (bool $strict): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    $sats      = Currency::fromCode('1000SATS');
+    $formatted = MoneyFormatter::formatFromMinor(123456789, $sats, 'en_US');
+
+    expect(MoneyFormatter::parseToMinor($formatted, $sats, 'en_US', strict: $strict))
+        ->toBe('123456789')
+        ->and(MoneyFormatter::parseToMinor(MoneyFormatter::formatFromMinor(123456789, $sats, 'sv_SE'), $sats, 'sv_SE', strict: $strict))
+        ->toBe('123456789');
+})->with([
+    'strict'  => [true],
+    'lenient' => [false],
+]);
+
+// Only the currency being read, in strict mode as well: the code beside the number is read where it
+// is the code of the currency asked for, and nothing else is.
+it('refuses another currency beside the number in strict mode', function (): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS', 'AUCTION'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor('AUCTION 1.00000000', Currency::fromCode('1000SATS'), 'en_US', strict: true))
+        ->toThrow(ParserException::class);
+});
+
+// The amount reaches ICU as a double, here and through the money library both, so an amount above
+// 2**53 minor units was rendered as a neighbouring one: 900719925474099301 came out as
+// $9,007,199,254,740,994.00, a dollar off an amount the casts store and read back exactly.
+it('refuses an amount a double cannot carry digit for digit', function (): void {
+    config(['larapara.available_currencies' => ['USD']]);
+
+    $usd = Currency::fromCode('USD');
+
+    expect(fn (): string => MoneyFormatter::formatFromMinor('900719925474099301', $usd, 'en_US'))
+        ->toThrow(InvalidAmount::class)
+        ->and(fn (): string => MoneyFormatter::format(new Money('900719925474099301', $usd->toMoneyCurrency()), 'en_US'))
+        ->toThrow(InvalidAmount::class)
+        ->and(fn (): string => MoneyFormatter::formatFromMinor('900719925474099301', $usd, 'en_US', showCurrencySymbol: false))
+        ->toThrow(InvalidAmount::class);
+});
+
+it('formats the largest amount a double carries exactly', function (): void {
+    config(['larapara.available_currencies' => ['USD']]);
+
+    expect(MoneyFormatter::formatFromMinor('9007199254740992', Currency::fromCode('USD'), 'en_US'))
+        ->toBe('$90,071,992,547,409.92');
+});
+
+// An abbreviation is an approximation by construction — $9.01Q says nothing about its last digit — so
+// it is the one place an amount too large to render exactly is still rendered.
+it('abbreviates an amount too large to format exactly', function (): void {
+    config(['larapara.available_currencies' => ['USD']]);
+
+    expect(replaceNonBreakingSpaces(MoneyFormatter::formatShortFromMinor('900719925474099301', Currency::fromCode('USD'), 'en_US')))
+        ->toBe('$9.01Q');
+});
+
+// Strict mode accepts what the locale writes, and for a code ICU carries it is ICU that decides what
+// that means: the exact space of the locale (a plain one is refused), the code where the symbol goes
+// and nowhere else, and any number of decimals. A code ICU cannot carry is held to the same rules
+// rather than to none, which is what stripping it from either end amounted to.
+it('refuses a code ICU cannot carry out of its place in strict mode', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'en_US', strict: true))
+        ->toThrow(ParserException::class);
+})->with([
+    'suffix where the locale writes a prefix' => ['1.00000000 1000SATS'],
+    'a space the locale does not write'       => ['1000SATS 1.00000000'],
+    'two of the space it does write'          => ["1000SATS\u{a0}\u{a0}1.00000000"],
+    'suffix with no separator'                => ['1.000000001000SATS'],
+]);
+
+// ICU reads its own code with no space between it and the number, so this reads that too.
+it('accepts a code ICU cannot carry with no separator, as ICU does', function (): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(MoneyFormatter::parseToMinor('1000SATS1.00000000', Currency::fromCode('1000SATS'), 'en_US', strict: true))
+        ->toBe('100000000');
+});
+
+// Both signs and both placements: en_US writes the minus before the code, which is neither end of the
+// string, so a negative amount in such a currency did not read back at all — in either mode.
+it('parses back what it writes for a code ICU cannot carry, either sign', function (string $locale, int $amount, bool $strict): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    $sats      = Currency::fromCode('1000SATS');
+    $formatted = MoneyFormatter::formatFromMinor($amount, $sats, $locale);
+
+    expect(MoneyFormatter::parseToMinor($formatted, $sats, $locale, strict: $strict))->toBe((string) $amount);
+})->with([
+    'code in front, strict'   => ['en_US', 123456789, true],
+    'code in front, negative' => ['en_US', -123456789, true],
+    'code behind, negative'   => ['sv_SE', -123456789, true],
+    'dot grouping, negative'  => ['de_DE', -123456789, true],
+    'lenient, negative'       => ['en_US', -123456789, false],
+]);
+
+// Lenient parsing is where the space a keyboard produces and a code written on the wrong side are
+// forgiven, since that is the difference between the two modes.
+it('forgives the placement of a code ICU cannot carry when lenient', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'en_US'))->toBe('100000000');
+})->with([
+    'a plain space' => ['1000SATS 1.00000000'],
+    'the suffix'    => ['1.00000000 1000SATS'],
+]);
+
+// The same rules where the locale writes the code behind the number and the minus in front of it, so
+// neither end of the string is where the code goes: reading it from the end it happens to be at
+// would accept "1000SATS 1,00" in a locale that writes "1,00 1000SATS".
+it('refuses a code ICU cannot carry out of its place in a locale that writes it behind', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'de_DE', strict: true))
+        ->toThrow(ParserException::class);
+})->with([
+    'prefix where the locale writes a suffix' => ['1000SATS 1,00000000'],
+    'the same with the minus of the locale'   => ['-1000SATS 1,00000000'],
+]);
+
+// ICU carries no symbol for a code it cannot carry, so the notations to look for beside the number
+// are the code and nothing else — and nothing is not a notation a string can be read without.
+it('refuses a string that is not a number for a code ICU cannot carry', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'en_US'))
+        ->toThrow(ParserException::class);
+})->with([
+    'a word'         => ['not a number'],
+    'another code'   => ['AUCTION 1.00000000'],
+    'the code alone' => ['1000SATS'],
 ]);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Number;
 use Pelmered\LaraPara\Currencies\Currency;
+use Pelmered\LaraPara\Exceptions\InvalidNumber;
 use Pelmered\LaraPara\MoneyFormatter\MoneyFormatter;
 
 beforeEach(function (): void {
@@ -141,4 +142,41 @@ it('abbreviates to a number of significant digits', function (int $significantDi
 })->with([
     'one'   => [1, '$1M'],
     'three' => [3, '$1.23M'],
+]);
+
+// $999,600 is 999.6 thousand, which every precision below four digits writes as 1000 — and 1,000K is
+// not an abbreviation of anything, so the magnitude has to carry with the rounding that caused it.
+it('carries into the next magnitude when the mantissa rounds up', function (array $precision, string $expectedOutput): void {
+    expect(MoneyFormatter::formatShortFromMinor(99960000, Currency::fromCode('USD'), 'en_US', ...$precision))
+        ->toBe($expectedOutput);
+})->with([
+    'default'               => [[], '$999.60K'],
+    'two decimals'          => [['decimals' => 2], '$999.60K'],
+    'one decimal'           => [['decimals' => 1], '$999.6K'],
+    'no decimals'           => [['decimals' => 0], '$1M'],
+    'one significant digit' => [['significantDigits' => 1], '$1M'],
+    'two significant'       => [['significantDigits' => 2], '$1M'],
+    'three significant'     => [['significantDigits' => 3], '$1M'],
+    'four significant'      => [['significantDigits' => 4], '$999.6K'],
+]);
+
+// An empty amount is an empty field, the way it is everywhere else in the formatter: a column that
+// holds no amount abbreviates to nothing rather than to the abbreviation of zero.
+it('abbreviates nothing as nothing', function (null|int|string $value): void {
+    expect(MoneyFormatter::formatShortFromMinor($value, Currency::fromCode('USD'), 'en_US'))->toBe('');
+})->with([
+    'null'         => [null],
+    'empty string' => [''],
+]);
+
+// Significant digits count digits, so the count starts at one: zero of them says nothing about the
+// number, and ICU renders it as though none had been asked for.
+it('refuses fewer than one significant digit', function (int $significantDigits): void {
+    expect(fn (): string => MoneyFormatter::formatShortFromMinor(123456789, Currency::fromCode('USD'), 'en_US', significantDigits: $significantDigits))
+        ->toThrow(InvalidNumber::class, (string) $significantDigits)
+        ->and(fn (): string => MoneyFormatter::formatNumber(1234.56, 'en_US', significantDigits: $significantDigits))
+        ->toThrow(InvalidNumber::class, (string) $significantDigits);
+})->with([
+    'none'     => [0],
+    'negative' => [-2],
 ]);

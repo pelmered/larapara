@@ -110,6 +110,20 @@ it('judges the amount on its own when the currency is not supported', function (
         ->and(validateValue('nonsense', new MoneyString('GBP', 'en_US'))->passes())->toBeFalse();
 });
 
+// The idiomatic call passes a request value straight in, and a client is free to send an array or a
+// number there, so the constructor takes whatever arrives: the amount is judged on the default
+// currency rather than the request 500ing before validation has run.
+it('takes a currency of any shape a request can carry', function (mixed $currency): void {
+    expect(validateValue('1234.56', new MoneyString($currency, 'en_US'))->passes())->toBeTrue()
+        ->and(validateValue('nonsense', new MoneyString($currency, 'en_US'))->passes())->toBeFalse();
+})->with([
+    'an array'     => [['USD']],
+    'a nested one' => [['code' => 'USD']],
+    'a number'     => [840],
+    'a boolean'    => [true],
+    'null'         => [null],
+]);
+
 it('shows the shape it expects in the message', function (string $locale, string $currency, string $expectedExample): void {
     $validator = validateValue('nonsense', new MoneyString($currency, $locale));
 

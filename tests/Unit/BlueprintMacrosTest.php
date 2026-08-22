@@ -8,6 +8,7 @@ use Illuminate\Database\Schema\Grammars\MySqlGrammar;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Fluent;
+use Pelmered\LaraPara\Exceptions\InvalidColumnScale;
 
 /**
  * Laravel 12 moved the connection into the Blueprint constructor's first argument.
@@ -185,6 +186,50 @@ it('takes the decimal scale from the macro', function (): void {
     expect(macroColumns('money', [null, 4])['amount'])->toBe(amount('decimal', total: 12, places: 4));
 });
 
+// A decimal column cannot keep more decimals than it holds digits: MySQL and PostgreSQL refuse the
+// column outright, while SQLite takes it and every amount written to it — so this used to be
+// something a project heard from its own database at deploy time, with a green test suite behind it.
+// smallMoney() is where it bites: its six digits have no room for the eight decimals a crypto amount
+// needs, which is the scale the README tells crypto projects to configure.
+it('refuses a scale the column has no digits for', function (string $macro, ?int $scale, int $configured): void {
+    config(['larapara.store.format' => 'decimal', 'larapara.store.decimal_scale' => $configured]);
+
+    expect(fn (): array => macroColumns($macro, [null, $scale]))
+        ->toThrow(InvalidColumnScale::class);
+})->with([
+    'small column, scale from the macro'  => ['smallMoney', 8, 3],
+    'small column, scale from the config' => ['smallMoney', null, 8],
+    'as many decimals as digits'          => ['smallMoney', 6, 3],
+    'wide column, from the macro'         => ['money', 12, 3],
+    'wide column, from the config'        => ['money', null, 20],
+]);
+
+it('takes a scale the column has one digit left for', function (): void {
+    config(['larapara.store.format' => 'decimal']);
+
+    expect(macroColumns('smallMoney', [null, 5])['amount'])
+        ->toBe(amount('decimal', unsigned: true, nullable: true, total: 6, places: 5));
+});
+
+// The way out of the exception is the point of it, so the message names both numbers and the macro
+// that has the digits to spare.
+it('names the digits and the wider macro when it refuses a scale', function (): void {
+    expect(InvalidColumnScale::exceedsColumnDigits('price', 8, 6)->getMessage())
+        ->toContain('"price"')
+        ->toContain('8 decimals')
+        ->toContain('6 digits')
+        ->toContain('money() holds 12');
+});
+
+// The scale belongs to a decimal column, so integer storage passes it by rather than refusing it: a
+// project storing minor units has no column for the decimals to be too many for.
+it('ignores a scale integer storage has no column for', function (): void {
+    config(['larapara.store.format' => 'int', 'larapara.store.decimal_scale' => 8]);
+
+    expect(macroColumns('smallMoney', [null, 8])['amount'])
+        ->toBe(amount('smallInteger', unsigned: true, nullable: true));
+});
+
 // The returned column is the amount, so the chain lands where it reads as landing.
 it('returns a column the caller can keep building on', function (): void {
     $blueprint = newBlueprint('test_table');
@@ -236,4 +281,15 @@ it('compiles through the MySQL and Postgres grammars', function (string $macro, 
         '`price` decimal(12, 3) unsigned not null',
         '"price" decimal(12, 3) not null',
     ],
+]);
+
+// A scale is a count of decimals, so a negative one is not a narrower column but a nonsense one: the
+// macro wrote decimal(12, -1), which MySQL rejects outright and other drivers read as they please.
+it('refuses a negative scale', function (?int $scale, int $configured): void {
+    config(['larapara.store.format' => 'decimal', 'larapara.store.decimal_scale' => $configured]);
+
+    expect(fn (): array => macroColumns('money', [null, $scale]))->toThrow(InvalidColumnScale::class);
+})->with([
+    'from the macro'  => [-1, 3],
+    'from the config' => [null, -1],
 ]);

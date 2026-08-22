@@ -26,9 +26,16 @@ class CurrencyCast implements CastsAttributes
             return null;
         }
 
+        // Resolved through the registry whichever object the configuration asks for, since
+        // `currency_cast_to` chooses the type a read hands back and not whether the code is one this
+        // configuration knows. Built straight from the column, a code available_currencies does not
+        // list read cleanly and then threw out of set(), which Eloquent calls to merge a cast
+        // attribute back into the model — a write validator failing on what a read had handed out.
+        $currency = Currency::fromCode($value);
+
         return match (config('larapara.currency_cast_to')) {
-            \Money\Currency::class => new \Money\Currency($value),
-            default                => Currency::fromCode($value)
+            \Money\Currency::class => $currency->toMoneyCurrency(),
+            default                => $currency,
         };
     }
 
@@ -42,7 +49,19 @@ class CurrencyCast implements CastsAttributes
     #[Param(attributes: 'array<string, mixed>')]
     public function serialize(Model $model, string $key, mixed $value, array $attributes): ?string
     {
-        return $value === null ? null : Currency::toCode($value);
+        if ($value === null) {
+            return null;
+        }
+
+        // The code of the object get() built, read rather than resolved a second time: get() hands
+        // back a \Money\Currency unvalidated where the configuration asks for one, so resolving it
+        // here would throw for a stored code this configuration no longer lists — a row that reads
+        // cleanly would fail on toArray(), and every serialized attribute would cost a lookup.
+        if ($value instanceof Currency || $value instanceof \Money\Currency) {
+            return (string) $value;
+        }
+
+        return Currency::toCode($value);
     }
 
     /**

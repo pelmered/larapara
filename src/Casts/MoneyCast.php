@@ -23,9 +23,18 @@ use PhpStaticAnalysis\Attributes\Throws;
 class MoneyCast implements CastsAttributes
 {
     /**
+     * @param  int|null  $scale  Decimals the column keeps, where they are not the configured ones:
+     *                           `MoneyCast::class.':8'` beside `$table->money('price', scale: 8)`.
+     *                           The scale an amount is refused for carrying more of, so a column
+     *                           given its own scale has to say so here as well — otherwise the
+     *                           amounts this cast accepts are not the ones the column holds.
+     */
+    public function __construct(private readonly ?int $scale = null) {}
+
+    /**
      * Cast the given value.
      */
-    #[Param(value: '?int')]
+    #[Param(value: 'int|float|string|null')]
     #[Param(attributes: 'array<string, mixed>')]
     public function get(Model $model, string $key, mixed $value, array $attributes): ?Money
     {
@@ -36,10 +45,8 @@ class MoneyCast implements CastsAttributes
         $currency = $this->getCurrencyFromModel($model, $key);
 
         $amount = config('larapara.store.format') === 'decimal'
-            // Rounded, because scaling the stored decimal back is not exact in binary floating
-            // point: 19.99 * 100 is 1998.9999999999998, which truncates to a cent too little.
-            ? (int) round((float) $value * 10 ** $this->getDecimals($currency->getCode()))
-            : (int) $value;
+            ? $this->fromDecimal((string) $value, $currency->getCode())
+            : $this->fromInteger($value, $currency->getCode());
 
         return new Money($amount, $currency);
     }
@@ -52,28 +59,25 @@ class MoneyCast implements CastsAttributes
     #[Returns('array<string, int|float|string|null>')]
     public function set(Model $model, string $key, mixed $value, array $attributes): array
     {
-        $amount      = $this->getAmount($model, $key, $value);
-        $currency    = $this->getCurrency($model, $key, $value);
-        $currencyKey = $key.config('larapara.currency_column_suffix', '_currency');
+        $amount   = $this->getAmount($model, $key, $value);
+        $currency = $this->getCurrency($model, $key, $value);
 
-        // Before the format branch, since dividing null by the scale factor would store a zero.
-        if ($amount === null) {
-            return [
-                $key         => null,
-                $currencyKey => $currency,
-            ];
-        }
+        $stored = match (true) {
+            // Before the format branch, since dividing null by the scale factor would store a zero.
+            $amount                         === null      => null,
+            config('larapara.store.format') === 'decimal' => $this->toDecimal($amount, $currency),
+            default                                       => $amount,
+        };
 
         return [
-            $key => config('larapara.store.format') === 'decimal'
-                ? $this->toDecimal($amount, $currency)
-                : $amount,
-            $currencyKey => $currency,
+            $key                                             => $stored,
+            LaraParaServiceProvider::currencyColumnFor($key) => $currency,
         ];
     }
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]
     #[Returns('int|null')]
+    #[Throws(InvalidAmount::class)]
     protected function getAmount(Model $model, string $key, Money|array|int|string|null $value): ?int
     {
         $amount = match (true) {
@@ -82,7 +86,24 @@ class MoneyCast implements CastsAttributes
             default                 => $value,
         };
 
-        return $amount !== null ? (int) $amount : null;
+        if ($amount === null) {
+            return null;
+        }
+
+        // By the formatter's rule rather than by a second one here, since both are given the same
+        // amounts: (int) read "1234.56" as 1234 and stored $12.34 for the amount whoever wrote it
+        // meant, which is the value the formatter refuses outright.
+        $amount = MoneyFormatter::toMinorUnits($amount);
+
+        // A Money holds its amount as a string and the money library counts in arbitrary precision,
+        // so an amount can be larger than the integer a column stores. Cast, it clamps to the
+        // largest one there is: PHP_INT_MAX stored for an amount that is not it, silently, which is
+        // the same deformation fromDecimal() refuses on the way back out.
+        if (filter_var($amount, FILTER_VALIDATE_INT) === false) {
+            throw InvalidAmount::exceedsStoredRange((string) $amount);
+        }
+
+        return (int) $amount;
     }
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]
@@ -101,7 +122,7 @@ class MoneyCast implements CastsAttributes
 
     protected function getCurrencyFromModel(Model $model, string $name): MoneyCurrency
     {
-        $currency = $model->{$name.config('larapara.currency_column_suffix', '_currency')} ?? config('larapara.default_currency');
+        $currency = $model->{LaraParaServiceProvider::currencyColumnFor($name)} ?? config('larapara.default_currency');
 
         if ($currency instanceof MoneyCurrency) {
             return $currency;
@@ -119,14 +140,14 @@ class MoneyCast implements CastsAttributes
      * The amount as the decimal string a decimal column stores.
      *
      * Built by placing the point rather than by dividing, so an amount larger than a double holds
-     * exactly is not deformed on its way to the column, and refused outright when the configured
-     * scale would round a digit away instead of letting the database drop it silently.
+     * exactly is not deformed on its way to the column, and refused outright when the scale in
+     * effect would round a digit away instead of letting the database drop it silently.
      */
     #[Throws(InvalidAmount::class)]
     protected function toDecimal(int $amount, string $currency): string
     {
         $minorUnit = $this->getDecimals($currency);
-        $scale     = LaraParaServiceProvider::decimalScale();
+        $scale     = LaraParaServiceProvider::decimalScale($this->scale);
 
         if ($minorUnit > $scale) {
             $unrepresentable = 10 ** ($minorUnit - $scale);
@@ -141,16 +162,100 @@ class MoneyCast implements CastsAttributes
             $minorUnit = $scale;
         }
 
+        // The digits of the amount rather than abs(), which has no integer to return for PHP_INT_MIN
+        // and hands back a float: the point was placed in "9.2233720368548E+18" and the column was
+        // given "-9.2233720368548E+.18", which a strict database refuses and SQLite stores as text.
         $sign   = $amount < 0 ? '-' : '';
-        $digits = str_pad((string) abs($amount), $minorUnit + 1, '0', STR_PAD_LEFT);
+        $digits = str_pad(ltrim((string) $amount, '-'), $minorUnit + 1, '0', STR_PAD_LEFT);
 
         return $minorUnit === 0
             ? $sign.$digits
             : $sign.substr($digits, 0, -$minorUnit).'.'.substr($digits, -$minorUnit);
     }
 
+    /**
+     * The minor units a decimal column holds: "1234.56" in USD is 123456.
+     *
+     * The inverse of toDecimal(), and exact the same way: the point is moved rather than the value
+     * multiplied, so an amount larger than a double holds exactly reads back as it was written. The
+     * column keeps `store.decimal_scale` decimals, which is at least the minor unit of most
+     * currencies, so the zeros it pads a shorter amount with are dropped again here.
+     */
+    #[Returns('numeric-string')]
+    #[Throws(InvalidAmount::class)]
+    protected function fromDecimal(string $value, string $currency): string
+    {
+        $minorUnit = $this->getDecimals($currency);
+
+        [$whole, $fraction] = array_pad(explode('.', trim($value), 2), 2, '');
+
+        $sign     = str_starts_with($whole, '-') ? '-' : '';
+        $whole    = ltrim($whole, '+-');
+        $fraction = rtrim($fraction, '0');
+
+        if (strlen($fraction) <= $minorUnit) {
+            $digits = ltrim($whole.str_pad($fraction, $minorUnit, '0'), '0');
+            $amount = $digits === '' ? '0' : $sign.$digits;
+
+            // Digits, and not merely numeric: exponent notation is numeric and pads to a digit
+            // string that is not — "1E+25" becomes "1E+2500" — which Money refuses a character at a
+            // time rather than reading. The reading below is the one written for that notation.
+            if (($digits === '' || ctype_digit($digits)) && is_numeric($amount)) {
+                // Refused here as the reading below refuses it, since both are read into an int by
+                // everything downstream: a column carrying more minor units than one holds would
+                // otherwise read back exactly and then fail to be written back.
+                return $this->withinIntegerRange($amount)
+                    ? $amount
+                    : throw InvalidAmount::exceedsIntegerRange(trim($value), $currency);
+            }
+        }
+
+        // Not a plain decimal carrying the decimals of its currency: a float in exponent notation
+        // from a driver that hands one back, or a row written by hand with more decimals than the
+        // currency has. Read as the number it is, which rounds rather than reads the amount short.
+        $minorAmount = round((float) $value * 10 ** $minorUnit);
+
+        // Cast beyond the integer range, the amount wraps to an unrelated — usually negative — one,
+        // so a column holding more than this cast can read says so instead of reading it wrongly.
+        if (! is_finite($minorAmount) || abs($minorAmount) >= (float) PHP_INT_MAX) {
+            throw InvalidAmount::exceedsIntegerRange(trim($value), $currency);
+        }
+
+        return (string) (int) $minorAmount;
+    }
+
+    /**
+     * The minor units an integer column holds, which is the number in it.
+     *
+     * Read with (int) alone, a column carrying more minor units than an integer holds — which a text
+     * or a decimal column can, whatever the macros write — clamped to PHP_INT_MAX: an amount that is
+     * not the one stored, silently, and one the cast would refuse to write.
+     */
+    #[Param(value: 'int|float|string')]
+    #[Throws(InvalidAmount::class)]
+    protected function fromInteger(mixed $value, string $currency): int
+    {
+        $amount = trim((string) $value);
+
+        if (ctype_digit(ltrim($amount, '-')) && ! $this->withinIntegerRange($amount)) {
+            throw InvalidAmount::exceedsIntegerRange($amount, $currency);
+        }
+
+        return (int) $amount;
+    }
+
+    /**
+     * Whether an amount is one an integer holds, which is what every path from a column reads into.
+     */
+    protected function withinIntegerRange(string $amount): bool
+    {
+        return filter_var($amount, FILTER_VALIDATE_INT) !== false;
+    }
+
     public function getDecimals(string $currencyCode): int
     {
-        return Currency::fromCode($currencyCode)->minorUnit ?? 2;
+        // The formatter's resolver, so the scale an amount is stored at is the scale it is
+        // formatted and parsed at — two lookups here would let the two drift apart.
+        return MoneyFormatter::getMinorUnit(Currency::fromCode($currencyCode));
     }
 }
