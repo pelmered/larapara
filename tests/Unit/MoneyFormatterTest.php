@@ -448,7 +448,7 @@ it('refuses a value that is not a number', function (mixed $value): void {
 // A value that is not a number is usually input that was never validated, and the message it lands in
 // goes to the log, so the message names the type it was given rather than repeating the value.
 it('keeps the rejected value out of the exception message', function (): void {
-    $value = '4111111111111111';
+    $value = 'not-a-number';
 
     expect(InvalidNumber::notNumeric($value)->getMessage())
         ->not->toContain($value)

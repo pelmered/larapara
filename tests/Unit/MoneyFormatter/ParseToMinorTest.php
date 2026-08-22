@@ -585,3 +585,36 @@ it('passes strictness on', function (): void {
         ->and(fn (): ?Money => MoneyFormatter::parseToMoney('1.5', 'SEK', 'sv_SE', strict: true))
         ->toThrow(ParserException::class);
 });
+
+// ICU can neither write nor read a code longer than three characters, so the notation the formatter
+// writes for one — the code beside the number — is read here rather than by ICU. Strict mode accepts
+// that notation, since it is what this configuration writes, and nothing else: the placement and the
+// separator ICU chose are the whole of what strict means for a code ICU has no reading of.
+it('accepts only the notation it writes for a code ICU cannot carry', function (string $template, bool $accepted): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    $currency  = Currency::fromCode('1000SATS');
+    $formatted = MoneyFormatter::formatFromMinor(100000000, $currency, 'en_US');
+
+    // The separator ICU put between the code and the number, whichever space it chose.
+    $separator = str_replace(['1000SATS', '1.00000000'], '', $formatted);
+    $input     = strtr($template, ['CODE' => '1000SATS', 'NUM' => '1.00000000', '_' => $separator]);
+
+    $parse = fn (): string => MoneyFormatter::parseToMinor($input, $currency, 'en_US', strict: true);
+
+    $accepted
+        ? expect($parse())->toBe('100000000')
+        : expect($parse)->toThrow(ParserException::class);
+
+    // Lenient parsing takes every one of them: a person filling in a form is not a formatter.
+    expect(MoneyFormatter::parseToMinor($input, $currency, 'en_US', strict: false))->toBe('100000000');
+})->with([
+    'as the formatter writes it' => ['CODE_NUM', true],
+    'the code last'              => ['NUM_CODE', false],
+    'a plain space'              => ['CODE NUM', false],
+    'the code last, plain space' => ['NUM CODE', false],
+    'no separator at all'        => ['NUMCODE', false],
+]);
