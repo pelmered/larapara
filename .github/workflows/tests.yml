@@ -101,6 +101,10 @@ jobs:
 
   mutation:
     runs-on: ubuntu-latest
+    # Once per pull request and once per merge, rather than on both events of
+    # every branch push the way the jobs above run: the score is a property of a
+    # change under review, and running it twice for one commit says nothing new.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     # Reporting only, for now. An escaped mutation is a question about a test
     # rather than a broken build, and the score has no history here yet to say
     # what a normal one looks like — drop this once it has held for a few runs
