@@ -517,3 +517,19 @@ it('stores the largest and smallest amounts an integer holds', function (string 
     'the largest'  => [(string) PHP_INT_MAX],
     'the smallest' => [(string) PHP_INT_MIN],
 ]);
+
+// The array form names the amount and the currency, either by key or by position. Without the
+// currency the default one is written, the same as for a currency assigned as null: the column is
+// not nullable, so an amount always records the unit it is counted in.
+it('takes the amount and the currency of an array whichever way it names them', function (array $value, array $expected): void {
+    config(['larapara.available_currencies' => ['USD', 'JPY']]);
+
+    $model        = new TestModel;
+    $model->price = $value;
+
+    expect($model->getAttributes())->toMatchArray($expected);
+})->with([
+    'by key'             => [['amount' => '98765', 'currency' => 'JPY'], ['price' => 98765, 'price_currency' => 'JPY']],
+    'by position'        => [['98765', 'JPY'], ['price' => 98765, 'price_currency' => 'JPY']],
+    'no currency at all' => [['amount' => '98765'], ['price' => 98765, 'price_currency' => 'USD']],
+]);

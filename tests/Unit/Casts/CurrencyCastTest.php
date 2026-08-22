@@ -182,3 +182,18 @@ it('serializes the currency the configuration casts to', function (string $castT
     'currency'       => [Currency::class, 'SEK'],
     'money currency' => [MoneyCurrency::class, 'SEK'],
 ]);
+
+// A row written before the column was made non-nullable holds a null, and toArray() says so rather
+// than reporting the default currency as the unit of an amount that is not there.
+it('serializes a null as a null', function (): void {
+    $model = (new Post)->newFromBuilder(['price' => null, 'price_currency' => null]);
+
+    expect($model->toArray()['price_currency'])->toBeNull()
+        ->and((new CurrencyCast)->serialize(new Post, 'price_currency', null, []))->toBeNull();
+});
+
+// A code reaches serialize() as a string where nothing resolved the attribute into an object first,
+// and the code it serializes as is the one the registry spells.
+it('serializes a code it is handed as a string', function (): void {
+    expect((new CurrencyCast)->serialize(new Post, 'price_currency', 'sek', []))->toBe('SEK');
+});

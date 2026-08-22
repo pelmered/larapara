@@ -366,3 +366,35 @@ it('forgives the placement of a code ICU cannot carry when lenient', function (s
     'a plain space' => ['1000SATS 1.00000000'],
     'the suffix'    => ['1.00000000 1000SATS'],
 ]);
+
+// The same rules where the locale writes the code behind the number and the minus in front of it, so
+// neither end of the string is where the code goes: reading it from the end it happens to be at
+// would accept "1000SATS 1,00" in a locale that writes "1,00 1000SATS".
+it('refuses a code ICU cannot carry out of its place in a locale that writes it behind', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'de_DE', strict: true))
+        ->toThrow(ParserException::class);
+})->with([
+    'prefix where the locale writes a suffix' => ['1000SATS 1,00000000'],
+    'the same with the minus of the locale'   => ['-1000SATS 1,00000000'],
+]);
+
+// ICU carries no symbol for a code it cannot carry, so the notations to look for beside the number
+// are the code and nothing else — and nothing is not a notation a string can be read without.
+it('refuses a string that is not a number for a code ICU cannot carry', function (string $input): void {
+    config([
+        'larapara.load_crypto_currencies' => true,
+        'larapara.available_currencies'   => ['USD', '1000SATS'],
+    ]);
+
+    expect(fn (): string => MoneyFormatter::parseToMinor($input, Currency::fromCode('1000SATS'), 'en_US'))
+        ->toThrow(ParserException::class);
+})->with([
+    'a word'         => ['not a number'],
+    'another code'   => ['AUCTION 1.00000000'],
+    'the code alone' => ['1000SATS'],
+]);
