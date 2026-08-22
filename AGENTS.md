@@ -20,9 +20,36 @@ composer lint                                  # pint + rector --dry-run + phpst
 composer fix                                   # pint --fix + rector (applies changes)
 composer coverage                              # clover coverage over src/
 composer types                                 # Pest type coverage
+composer mutate                                # Pest mutation testing over src/
 ```
 
 Tests run on Testbench with sqlite `:memory:`; there is no dev database to protect.
+
+`composer mutate` changes one operator, condition or return value in `src/` at a time and reports the
+ones the suite still passed with. It answers the question line coverage cannot: whether a test would
+notice the code being wrong. It needs a coverage driver (pcov is enough) and takes minutes rather
+than seconds, so it is a deliberate run and not part of `composer check`. An escaped mutation is a
+question, not a defect: some are worth a test, and some — a config default, a message string — are
+noise to be read past.
+
+Two directories are excluded from it, both for the same reason: they hold no behaviour, and mutating
+them buries the code that does.
+
+- `Currencies/Providers` is data — a name and a minor unit per currency, 2600 lines of it — and a
+  mutated table field (`minorUnit: 2` → `3`, a currency's name → nonsense) is unkillable by any test
+  worth writing. It accounted for 3481 of 4606 mutations. A provider that ever grows logic needs
+  taking out of this exclusion.
+- `Exceptions` is prose. Every class there is static factories returning `new self('message ' . $value)`
+  with no branching, and the mutators chop one fragment off each concatenated message at a time — 137
+  survivors, since tests assert the exception type and the values interpolated into it, not the
+  wording. Concatenation over interpolation (house style) multiplies these.
+
+Both are paths, not namespaces: `--ignore` matches against the file path whatever its help text says.
+
+What is left is 941 mutations over 12 files, scoring 82% — the number CI holds to a floor of 78, the
+slack being that formatted output depends on the runner's ICU. A mutation reported as *uncovered*
+rather than untested is a constant declaration: not an executable line, so no test can be said to
+reach it.
 
 ## Architecture
 

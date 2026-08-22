@@ -93,6 +93,9 @@
         ],
         "types": [
             "@php vendor/bin/pest --type-coverage"
+        ],
+        "mutate": [
+            "@php vendor/bin/pest --mutate --parallel --class=\"Pelmered\\LaraPara\" --ignore=src/Currencies/Providers,src/Exceptions"
         ]
     },
     "config": {

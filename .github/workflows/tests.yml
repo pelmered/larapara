@@ -99,6 +99,41 @@ jobs:
       - name: Execute tests
         run: vendor/bin/pest
 
+  mutation:
+    runs-on: ubuntu-latest
+    # Reporting only, for now. An escaped mutation is a question about a test
+    # rather than a broken build, and the score has no history here yet to say
+    # what a normal one looks like — drop this once it has held for a few runs
+    # and the floor below is doing the work.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: intl, fileinfo, zip, pdo, sqlite, pdo_sqlite, bcmath
+          # Mutation testing needs a coverage driver: which tests to re-run for a
+          # changed line is a coverage question.
+          coverage: pcov
+
+      - name: Install dependencies
+        run: composer install --no-interaction
+
+      # Formatted output differs per ICU build, so a mutation the runner's ICU
+      # hides is a mutation this job reports and a local run does not.
+      - name: Report ICU version
+        run: php -r 'printf("PHP %s, ICU %s, CLDR %s%s", PHP_VERSION, INTL_ICU_VERSION, INTL_ICU_DATA_VERSION, PHP_EOL);'
+
+      # The floor sits a few points under the score at the time of writing (82%),
+      # since which mutations survive depends on the runner's ICU: formatted
+      # output is what most of these tests assert against.
+      - name: Run mutation testing
+        run: composer mutate -- --min=78
+
   report-metrics:
     runs-on: ubuntu-latest
     # Reporting only. Coverage thresholds and the upload depend on an external
