@@ -103,7 +103,7 @@ MONEY_AVAILABLE_CURRENCIES="USD,EUR,SEK"
 | `intl_currency_symbol`    | `MONEY_INTL_CURRENCY_SYMBOL`    | `false`                  | Use ISO 4217 codes (`USD`, `EUR`, `SEK`) instead of symbols (`$`, `€`, `kr`).                      |
 | `parse.strict`            | `MONEY_PARSE_STRICT`            | `false`                  | Accept only what the locale itself writes when parsing. See [strict mode](#strict-mode).           |
 | `currency_provider`       | –                               | `ISOCurrenciesProvider`  | Class that provides the currency list. See [custom currency lists](#custom-currency-lists).        |
-| `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of ISO codes. Comma separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `InvalidConfiguration`. |
+| `available_currencies`    | `MONEY_AVAILABLE_CURRENCIES`    | `[]` (all)               | Allow list of codes the configured provider supplies — ISO by default, crypto codes with `load_crypto_currencies`, whatever a custom provider brings. Comma-separated in `.env`, array in the config file. Codes are trimmed and upper-cased; a code the currency provider does not know throws `InvalidConfiguration`. |
 | `excluded_currencies`     | –                               | `[]`                     | Deny list. Only applied when `available_currencies` is empty.                                      |
 | `currency_column_suffix`  | `MONEY_CURRENCY_COLUMN_SUFFIX`  | `_currency`              | Suffix for the currency column belonging to an amount column.                                      |
 | `currency_cache.type`     | `MONEY_CURRENCY_CACHE`          | `flexible`               | `remember`, `flexible`, `forever` or `false` to disable.                                           |
@@ -494,8 +494,9 @@ MoneyFormatter::formatNumber(null, 'en_US');           // ''
 MoneyFormatter::formatNumber('not a number', 'en_US'); // InvalidNumber
 MoneyFormatter::formatNumber('1.234,56', 'en_US');     // InvalidNumber — that is a localized string
 
-// A double carries fifteen significant digits, and ICU renders through one, so a value written with
-// more of them is refused rather than rendered as the number a double happens to hold.
+// A double carries 53 bits of precision, and ICU renders through one, so a value needing more of them
+// is refused rather than rendered as the number a double happens to hold. Which is a ceiling rather
+// than a digit count: sixteen digits are exact below it, and refused above.
 MoneyFormatter::formatNumber('1234567890123456', 'en_US'); // 1,234,567,890,123,456 — exact
 MoneyFormatter::formatNumber('9007199254740993', 'en_US'); // InvalidNumber — past 2^53
 ```
@@ -823,7 +824,7 @@ Both rules pass an empty value, so `required` and `nullable` stay in charge of w
 Validates that a string is an amount `parseToMinor()` can read, in the same locale and under the same rules.
 
 ```php
-new MoneyString(
+public function __construct(
     mixed $currency = null,    // a Currency, a Money\Currency or a code; defaults to config('larapara.default_currency')
     ?string $locale = null,    // defaults to app()->getLocale()
     ?bool $strict = null,      // defaults to config('larapara.parse.strict')

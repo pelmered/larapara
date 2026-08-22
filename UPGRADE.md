@@ -108,10 +108,11 @@ named for what it takes:
 - `formatFromMinor()` is the old `format()`: the same arguments, minus the `Money` it no longer accepts,
   and named for the unit it takes — neither `format` nor `formatAmount` said that 123456 means $1,234.56.
 - `formatNumber()` scales nothing: `formatNumber(1234.56, 'en_US')` is `1,234.56` and
-  `formatNumber(1234, 'en_US')` is `1,234`. It keeps the decimals the value has, however many there are —
-  `formatNumber(1234.5678, 'en_US')` is `1,234.5678`, where ICU's own default stops at three. Its
-  `$minorDecimals` parameter is gone, and so is the `minorUnits` argument and the
-  `number_format.minor_units` config key of the previous iteration.
+  `formatNumber(1234, 'en_US')` is `1,234`. It keeps the decimals the value has rather than the three
+  ICU's own default stops at — `formatNumber(1234.5678, 'en_US')` is `1,234.5678` — as far as a double
+  carries them: a value needing more precision than its 53 bits throws `InvalidNumber` rather than being
+  rendered as the number a double happens to hold. Its `$minorDecimals` parameter is gone, and so is the
+  `minorUnits` argument and the `number_format.minor_units` config key of the previous iteration.
 
 ```php
 // a Money — what MoneyCast gives you
@@ -234,7 +235,7 @@ leniently and refused strictly, exactly as it is for `USD`.
 
 ## Formatting refuses a value a double cannot carry
 
-ICU renders through a double, which carries fifteen significant decimal digits, and so did every format
+ICU renders through a double, which carries 53 bits of precision, and so did every format
 call here — silently. `formatNumber('9007199254740993', 'en_US')` returned `9,007,199,254,740,992`, and
 an amount of `900719925474099301` minor units in USD was written as `$9,007,199,254,740,994.00`: a dollar
 away from an amount the casts store and read back exactly.
@@ -588,8 +589,9 @@ MONEY_AVAILABLE_CURRENCIES=USD,EUR,GBP
 #### Example:
 ```php
 MoneyFormatter::formatAsDecimal(123456, Currency::fromCode('USD')); // Output: $1,234.56
-// should be changed to:
-// formatNumber() takes a plain number and does not convert from minor units,
-// so divide by 100 (or use formatFromMinor() with showCurrencySymbol: false).
+// should be changed to formatFromMinor() without the symbol, which scales by the minor unit of the
+// currency it is given — a fixed division by 100 is wrong for JPY (0 decimals) and BHD (3):
+MoneyFormatter::formatFromMinor(123456, Currency::fromCode('USD'), 'en_US', showCurrencySymbol: false); // 1,234.56
+// formatNumber() is the replacement where the value is a plain number rather than minor units:
 MoneyFormatter::formatNumber(1234.56, 'en_US'); // Output: 1,234.56
 ```
