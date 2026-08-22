@@ -380,6 +380,19 @@ $post->price = '1234.56';   // InvalidAmount, where it used to store 1234
 $post->price = MoneyFormatter::parseToMoney($request->input('price'), $currency, app()->getLocale());
 ```
 
+## Storing an amount refuses one larger than an integer holds
+
+A `Money` carries its amount as a string and the money library counts in arbitrary precision, so an
+amount can be larger than the integer a column stores — `$money->multiply()` on a large amount reaches
+one easily. `MoneyCast` cast it to an int, which clamps: `99999999999999999999` was stored as
+`9223372036854775807` in an integer column and as `92233720368547758.07` in a decimal one, both
+silently, and neither the amount that was written.
+
+Such an amount now throws `Pelmered\LaraPara\Exceptions\InvalidAmount`, the same way reading a
+column holding one does. `PHP_INT_MAX` minor units is still stored — about 92 quadrillion units of a
+two-decimal currency — so this only reaches an application counting in a unit far smaller than the
+amounts it holds.
+
 ## `currency_cast_to` chooses the object, not whether the code is validated
 
 With `currency_cast_to = Money\Currency::class`, `CurrencyCast` built the object straight from the

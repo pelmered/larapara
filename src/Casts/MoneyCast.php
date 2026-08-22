@@ -93,7 +93,17 @@ class MoneyCast implements CastsAttributes
         // By the formatter's rule rather than by a second one here, since both are given the same
         // amounts: (int) read "1234.56" as 1234 and stored $12.34 for the amount whoever wrote it
         // meant, which is the value the formatter refuses outright.
-        return (int) MoneyFormatter::toMinorUnits($amount);
+        $amount = MoneyFormatter::toMinorUnits($amount);
+
+        // A Money holds its amount as a string and the money library counts in arbitrary precision,
+        // so an amount can be larger than the integer a column stores. Cast, it clamps to the
+        // largest one there is: PHP_INT_MAX stored for an amount that is not it, silently, which is
+        // the same deformation fromDecimal() refuses on the way back out.
+        if (filter_var($amount, FILTER_VALIDATE_INT) === false) {
+            throw InvalidAmount::exceedsStoredRange((string) $amount);
+        }
+
+        return (int) $amount;
     }
 
     #[Param(value: 'array{0?: int, 1?: string, amount?: int, currency?: string}|Money|int|string|null')]

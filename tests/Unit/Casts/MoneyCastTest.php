@@ -485,3 +485,35 @@ it('refuses a negative scale', function (): void {
     expect(fn (): array => (new MoneyCast)->set($model, 'price', $money, []))
         ->toThrow(InvalidColumnScale::class);
 });
+
+// A Money holds its amount as a string and the money library counts in arbitrary precision, so an
+// amount can be larger than the integer a column stores. Cast to one, it clamped to the largest
+// integer there is: 99999999999999999999 was stored as 9223372036854775807 in an integer column and
+// as 92233720368547758.07 in a decimal one, both silently, and both a different amount.
+it('refuses an amount larger than the integer a column stores', function (string $format): void {
+    config(['larapara.store.format' => $format]);
+
+    $model = new TestModel;
+    $money = new Money('99999999999999999999', new Currency('USD'));
+
+    expect(fn (): array => (new MoneyCast)->set($model, 'price', $money, []))
+        ->toThrow(InvalidAmount::class, '99999999999999999999');
+})->with(['int', 'decimal']);
+
+it('refuses an amount past the integer range whichever way it is written', function (mixed $value): void {
+    expect(fn (): array => (new MoneyCast)->set(new TestModel, 'price', $value, []))
+        ->toThrow(InvalidAmount::class);
+})->with([
+    'one past the largest'  => ['9223372036854775808'],
+    'one past the smallest' => ['-9223372036854775809'],
+    'far past it'           => ['99999999999999999999'],
+    'in the array form'     => [['amount' => '99999999999999999999', 'currency' => 'USD']],
+]);
+
+it('stores the largest and smallest amounts an integer holds', function (string $amount): void {
+    expect((new MoneyCast)->set(new TestModel, 'price', new Money($amount, new Currency('USD')), [])['price'])
+        ->toBe((int) $amount);
+})->with([
+    'the largest'  => [(string) PHP_INT_MAX],
+    'the smallest' => [(string) PHP_INT_MIN],
+]);

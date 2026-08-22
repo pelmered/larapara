@@ -26,6 +26,15 @@ class InvalidAmount extends InvalidArgumentException
         );
     }
 
+    public static function exceedsStoredRange(string $value): self
+    {
+        return new self(
+            'The amount "'.$value.'" is more minor units than an integer holds, and an amount is stored as an '
+            .'integer count of them, so storing it would write a different amount — the largest one an integer '
+            .'holds. A Money carries an amount of any size; a column does not.'
+        );
+    }
+
     public static function exceedsFormattingPrecision(string $value, string $currency): self
     {
         return new self(
