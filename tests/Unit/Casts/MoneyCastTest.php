@@ -533,3 +533,35 @@ it('takes the amount and the currency of an array whichever way it names them', 
     'by position'        => [['98765', 'JPY'], ['price' => 98765, 'price_currency' => 'JPY']],
     'no currency at all' => [['amount' => '98765'], ['price' => 98765, 'price_currency' => 'USD']],
 ]);
+
+// Read with (int) alone, a column carrying more minor units than an integer holds clamped to
+// PHP_INT_MAX — an amount that is not the one stored, and one the cast refuses to write back. A
+// bigint column cannot hold such a value, but the text and decimal columns a hand-written migration
+// leaves behind can, and the exponent-notation reading already refused it.
+it('refuses to read a column holding more minor units than an integer', function (string $format, string $column): void {
+    config(['larapara.store.format' => $format]);
+
+    $model = (new Post)->newFromBuilder(['price_currency' => 'USD']);
+
+    expect(fn (): ?Money => (new MoneyCast)->get($model, 'price', $column, []))
+        ->toThrow(InvalidAmount::class, $column);
+})->with([
+    'integer storage'           => ['int', '99999999999999999999'],
+    'integer storage, negative' => ['int', '-99999999999999999999'],
+    'decimal storage'           => ['decimal', '99999999999999999999.00'],
+]);
+
+// abs() has no integer to return for PHP_INT_MIN, so it handed back a float and the point was placed
+// in its exponent notation: the column was given "-9.2233720368548E+.18", which a strict database
+// refuses outright and SQLite stores as text.
+it('writes the smallest amount an integer holds to a decimal column', function (): void {
+    config(['larapara.store.format' => 'decimal', 'larapara.store.decimal_scale' => 2]);
+
+    $model = (new Post)->newFromBuilder(['price_currency' => 'USD']);
+    $cast  = new MoneyCast;
+
+    $stored = $cast->set($model, 'price', new Money((string) PHP_INT_MIN, new Currency('USD')), [])['price'];
+
+    expect($stored)->toBe('-92233720368547758.08')
+        ->and($cast->get($model, 'price', $stored, [])->getAmount())->toBe((string) PHP_INT_MIN);
+});

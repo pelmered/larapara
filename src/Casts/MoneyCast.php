@@ -46,7 +46,7 @@ class MoneyCast implements CastsAttributes
 
         $amount = config('larapara.store.format') === 'decimal'
             ? $this->fromDecimal((string) $value, $currency->getCode())
-            : (int) $value;
+            : $this->fromInteger($value, $currency->getCode());
 
         return new Money($amount, $currency);
     }
@@ -162,8 +162,11 @@ class MoneyCast implements CastsAttributes
             $minorUnit = $scale;
         }
 
+        // The digits of the amount rather than abs(), which has no integer to return for PHP_INT_MIN
+        // and hands back a float: the point was placed in "9.2233720368548E+18" and the column was
+        // given "-9.2233720368548E+.18", which a strict database refuses and SQLite stores as text.
         $sign   = $amount < 0 ? '-' : '';
-        $digits = str_pad((string) abs($amount), $minorUnit + 1, '0', STR_PAD_LEFT);
+        $digits = str_pad(ltrim((string) $amount, '-'), $minorUnit + 1, '0', STR_PAD_LEFT);
 
         return $minorUnit === 0
             ? $sign.$digits
@@ -198,7 +201,12 @@ class MoneyCast implements CastsAttributes
             // string that is not — "1E+25" becomes "1E+2500" — which Money refuses a character at a
             // time rather than reading. The reading below is the one written for that notation.
             if (($digits === '' || ctype_digit($digits)) && is_numeric($amount)) {
-                return $amount;
+                // Refused here as the reading below refuses it, since both are read into an int by
+                // everything downstream: a column carrying more minor units than one holds would
+                // otherwise read back exactly and then fail to be written back.
+                return $this->withinIntegerRange($amount)
+                    ? $amount
+                    : throw InvalidAmount::exceedsIntegerRange(trim($value), $currency);
             }
         }
 
@@ -210,10 +218,38 @@ class MoneyCast implements CastsAttributes
         // Cast beyond the integer range, the amount wraps to an unrelated — usually negative — one,
         // so a column holding more than this cast can read says so instead of reading it wrongly.
         if (! is_finite($minorAmount) || abs($minorAmount) >= (float) PHP_INT_MAX) {
-            throw InvalidAmount::exceedsIntegerRange($value, $currency);
+            throw InvalidAmount::exceedsIntegerRange(trim($value), $currency);
         }
 
         return (string) (int) $minorAmount;
+    }
+
+    /**
+     * The minor units an integer column holds, which is the number in it.
+     *
+     * Read with (int) alone, a column carrying more minor units than an integer holds — which a text
+     * or a decimal column can, whatever the macros write — clamped to PHP_INT_MAX: an amount that is
+     * not the one stored, silently, and one the cast would refuse to write.
+     */
+    #[Param(value: 'int|float|string')]
+    #[Throws(InvalidAmount::class)]
+    protected function fromInteger(mixed $value, string $currency): int
+    {
+        $amount = trim((string) $value);
+
+        if (ctype_digit(ltrim($amount, '-')) && ! $this->withinIntegerRange($amount)) {
+            throw InvalidAmount::exceedsIntegerRange($amount, $currency);
+        }
+
+        return (int) $amount;
+    }
+
+    /**
+     * Whether an amount is one an integer holds, which is what every path from a column reads into.
+     */
+    protected function withinIntegerRange(string $amount): bool
+    {
+        return filter_var($amount, FILTER_VALIDATE_INT) !== false;
     }
 
     public function getDecimals(string $currencyCode): int
