@@ -31,17 +31,17 @@
         "illuminate/contracts": "^11.28 | ^12 | ^13",
         "illuminate/database": "^11.28 | ^12 | ^13",
         "illuminate/support": "^11.28 | ^12 | ^13",
-        "php-static-analysis/attributes": "^0.3.1 | ^0.4.0",
+        "php-static-analysis/attributes": "^0.3.1 | ^0.4.0 | ^0.5.0",
         "spatie/laravel-package-tools": "^1.92"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0 | ^10.0 | ^11.0",
         "nunomaduro/collision": "^8.0",
         "laravel/pint": "^1.16",
-        "pestphp/pest": "^3.8 | ^4.0",
-        "pestphp/pest-plugin-type-coverage": "^3.8 | ^4.0",
+        "pestphp/pest": "^3.8 | ^4.0 | ^5.0",
+        "pestphp/pest-plugin-type-coverage": "^3.8 | ^4.0 | ^5.0",
         "larastan/larastan": "^3.0",
-        "php-static-analysis/phpstan-extension": "^0.4.0",
+        "php-static-analysis/phpstan-extension": "^0.4.0 | ^0.5.0",
         "spatie/laravel-ray": "^1.39",
         "rector/rector": "^2.0"
     },
